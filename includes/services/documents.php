@@ -25,15 +25,15 @@ function wc_suf_generate_batch_label_html( $batch_code, $rows ) {
     /*
      * اندازه کل ردیف چاپ
      */
-    $page_width_mm    = 118.11;
-    $page_height_mm   = 29.97;
+    $page_width_mm    = 95.0;
+    $page_height_mm   = 27.0;
 
     /*
      * فاصله‌های موردنظر شما
      */
-    $row_margin_x_mm  = 2.0; // فاصله از راست و چپ
-    $row_margin_y_mm  = 1.0; // فاصله از بالا و پایین
-    $label_gap_mm     = 3.0; // فاصله بین دو لیبل
+    $row_margin_x_mm  = 1.0; // فاصله از راست و چپ
+    $row_margin_y_mm  =  0.0; // فاصله از بالا و پایین
+    $label_gap_mm     = 5.0; // فاصله بین دو لیبل
 
     /*
      * اندازه ناحیه قابل استفاده
@@ -41,8 +41,8 @@ function wc_suf_generate_batch_label_html( $batch_code, $rows ) {
     $usable_row_width  = $page_width_mm - ( 2 * $row_margin_x_mm );
     $usable_row_height = $page_height_mm - ( 2 * $row_margin_y_mm );
 
-    $label_width_mm    = ( $usable_row_width - $label_gap_mm ) / 2;
-    $label_height_mm   = $usable_row_height;
+    $label_width_mm    = 44.0;
+$label_height_mm   = 27.0;
 
     $label_items = [];
     foreach ( $rows as $r ) {
