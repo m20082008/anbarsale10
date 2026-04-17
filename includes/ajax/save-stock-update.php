@@ -48,12 +48,14 @@ function wc_suf_sync_sale_hold_order_handler(){
         $ulog = (string) ( $user->display_name ?: $user->user_login );
     }
 
+    $is_new_hold_order = false;
     if ( $order_id > 0 ) {
         $order = wc_get_order( $order_id );
     } else {
         $order = wc_create_order();
         $order->set_created_via( 'wc_suf_manual_sale_hold' );
         $order->set_status( 'initialorder', 'ایجاد اولیه سفارش هولد از فرم فروش.' );
+        $is_new_hold_order = true;
     }
     if ( ! $order ) {
         wp_send_json_error(['message'=>'دسترسی به سفارش هولد ممکن نیست.']);
@@ -120,11 +122,20 @@ function wc_suf_sync_sale_hold_order_handler(){
     $order->update_meta_data( '_wc_suf_sale_channel', ( $op_type === 'sale_teh' ? 'tehranpars' : 'main' ) );
     $order->update_meta_data( '_wc_suf_sale_operation', $op_type );
     $order->update_meta_data( '_wc_suf_sale_hold_active', 'yes' );
+    if ( $is_new_hold_order ) {
+        $order->update_meta_data( '_wc_suf_sale_hold_started_at', time() );
+    }
     $order->update_meta_data( '_wc_suf_sale_customer_name', $customer_name );
     $order->update_meta_data( '_wc_suf_sale_customer_mobile', $customer_mobile );
     $order->update_meta_data( '_wc_suf_sale_customer_address', $customer_address );
     $order->calculate_totals();
     $order->save();
+
+    if ( $is_new_hold_order && 'yes' !== $order->get_meta( '_wc_suf_sale_hold_logged', true ) ) {
+        wc_suf_log_sale_hold_event( $order, 'sale_hold', 'هولد اولیه سفارش فروش', -1 );
+        $order->update_meta_data( '_wc_suf_sale_hold_logged', 'yes' );
+        $order->save_meta_data();
+    }
 
     wc_suf_schedule_sale_hold_expiry( $order->get_id() );
 
