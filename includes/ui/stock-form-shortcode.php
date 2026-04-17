@@ -251,12 +251,6 @@ add_shortcode('stock_update_form', function($atts){
             <span>فروش</span>
           </label>
           <?php endif; ?>
-          <?php if ( in_array( 'sale_teh', $allowed_ops, true ) ) : ?>
-          <label class="wc-suf-optype-btn" data-op="sale_teh">
-            <input type="radio" name="op-type" value="sale_teh">
-            <span>فروش برای تهرانپارس</span>
-          </label>
-          <?php endif; ?>
           <?php if ( in_array( 'onlyLabel', $allowed_ops, true ) ) : ?>
           <label class="wc-suf-optype-btn" data-op="onlyLabel">
             <input type="radio" name="op-type" value="onlyLabel">
