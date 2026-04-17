@@ -230,7 +230,7 @@ function wc_suf_get_detailed_logs_rows( $filters, $limit = 100, $apply_limit = t
         $params[] = $batch_filter;
     }
 
-    if ( in_array( $op_filter, ['in','out','transfer','return','sale','sale_teh','sale_edit','sale_cancel','onlyLabel'], true ) ) {
+    if ( in_array( $op_filter, ['in','out','transfer','return','sale','sale_teh','sale_hold','sale_hold_release','sale_edit','sale_cancel','onlyLabel'], true ) ) {
         $where[] = 'm.operation = %s';
         $params[] = $op_filter;
     }
@@ -305,7 +305,7 @@ function wc_suf_get_detailed_logs_total_count( $filters ) {
         $where[] = 'm.batch_code = %s';
         $params[] = $batch_filter;
     }
-    if ( in_array( $op_filter, ['in','out','transfer','return','sale','sale_teh','sale_edit','sale_cancel','onlyLabel'], true ) ) {
+    if ( in_array( $op_filter, ['in','out','transfer','return','sale','sale_teh','sale_hold','sale_hold_release','sale_edit','sale_cancel','onlyLabel'], true ) ) {
         $where[] = 'm.operation = %s';
         $params[] = $op_filter;
     }
@@ -557,6 +557,8 @@ function wc_suf_render_detailed_logs_html( $args = [] ) {
                     <option value="return" <?php selected($op_filter, 'return'); ?>>مرجوعی</option>
                     <option value="sale" <?php selected($op_filter, 'sale'); ?>>فروش</option>
                     <option value="sale_teh" <?php selected($op_filter, 'sale_teh'); ?>>فروش تهرانپارس</option>
+                    <option value="sale_hold" <?php selected($op_filter, 'sale_hold'); ?>>هولد سفارش فروش</option>
+                    <option value="sale_hold_release" <?php selected($op_filter, 'sale_hold_release'); ?>>اتمام هولد و برگشت موجودی</option>
                     <option value="sale_edit" <?php selected($op_filter, 'sale_edit'); ?>>ویرایش سفارش</option>
                     <option value="sale_cancel" <?php selected($op_filter, 'sale_cancel'); ?>>لغو سفارش (برگشت موجودی)</option>
                     <option value="onlyLabel" <?php selected($op_filter, 'onlyLabel'); ?>>صرفاً جهت چاپ</option>

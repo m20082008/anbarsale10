@@ -362,6 +362,8 @@ function wc_suf_op_label($op){
     if ($op === 'in')       return 'ورود';
     if ($op === 'sale')     return 'فروش';
     if ($op === 'sale_teh') return 'فروش تهرانپارس';
+    if ($op === 'sale_hold') return 'هولد سفارش فروش';
+    if ($op === 'sale_hold_release') return 'اتمام هولد و برگشت موجودی';
     if ($op === 'sale_edit') return 'ویرایش سفارش';
     if ($op === 'sale_cancel') return 'لغو سفارش (برگشت موجودی)';
     if ($op === 'onlyLabel') return 'فقط لیبل';

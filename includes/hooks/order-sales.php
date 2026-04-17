@@ -7,9 +7,27 @@ function wc_suf_get_sale_hold_minutes() {
 function wc_suf_schedule_sale_hold_expiry( $order_id ) {
     $order_id = (int) $order_id;
     if ( $order_id <= 0 ) return;
+    $order = wc_get_order( $order_id );
+    if ( ! $order ) return;
     $hook = 'wc_suf_sale_hold_expire_event';
+
+    $started_at = (int) $order->get_meta( '_wc_suf_sale_hold_started_at', true );
+    if ( $started_at <= 0 ) {
+        $started_at = time();
+        $order->update_meta_data( '_wc_suf_sale_hold_started_at', $started_at );
+    }
+
+    $expires_at = $started_at + ( wc_suf_get_sale_hold_minutes() * MINUTE_IN_SECONDS );
+    $order->update_meta_data( '_wc_suf_sale_hold_expires_at', $expires_at );
+    $order->save_meta_data();
+
+    $next = wp_next_scheduled( $hook, [ $order_id ] );
+    if ( $next && abs( $next - $expires_at ) <= 5 ) {
+        return;
+    }
+
     wp_clear_scheduled_hook( $hook, [ $order_id ] );
-    wp_schedule_single_event( time() + ( wc_suf_get_sale_hold_minutes() * MINUTE_IN_SECONDS ), $hook, [ $order_id ] );
+    wp_schedule_single_event( max( time() + 1, $expires_at ), $hook, [ $order_id ] );
 }
 
 function wc_suf_clear_sale_hold_expiry( $order_id ) {
@@ -27,6 +45,104 @@ function wc_suf_expire_sale_hold_order( $order_id ) {
     $order->save();
 }
 add_action( 'wc_suf_sale_hold_expire_event', 'wc_suf_expire_sale_hold_order', 10, 1 );
+
+function wc_suf_log_sale_hold_event( $order, $operation, $purpose_prefix, $qty_sign = -1 ) {
+    if ( ! $order || ! is_a( $order, 'WC_Order' ) ) {
+        return;
+    }
+
+    global $wpdb;
+    $move_table = $wpdb->prefix . 'stock_production_moves';
+    $audit_table = $wpdb->prefix . 'stock_audit';
+
+    $order_number = (string) $order->get_order_number();
+    $created_at_mysql = current_time( 'mysql' );
+    $stock_source = wc_suf_get_order_stock_source( $order );
+    $customer_id = (int) $order->get_customer_id();
+    $seller_name = trim( (string) $order->get_meta( '_wc_suf_seller_name', true ) );
+    if ( $seller_name === '' ) {
+        $seller_name = trim( (string) $order->get_meta( 'فروشنده', true ) );
+    }
+    $seller_user_id = (int) $order->get_meta( '_wc_suf_seller_id', true );
+    $log_user_id = $seller_user_id > 0 ? $seller_user_id : ( $customer_id > 0 ? $customer_id : 0 );
+    $log_user_login = $seller_name !== '' ? $seller_name : (string) $order->get_billing_email();
+
+    foreach ( $order->get_items( 'line_item' ) as $item ) {
+        if ( ! is_a( $item, 'WC_Order_Item_Product' ) ) continue;
+
+        $qty = max( 0, (float) $item->get_quantity() );
+        if ( $qty <= 0 ) continue;
+
+        $product_id = (int) $item->get_variation_id();
+        if ( $product_id <= 0 ) {
+            $product_id = (int) $item->get_product_id();
+        }
+        if ( $product_id <= 0 ) continue;
+
+        $product = wc_get_product( $product_id );
+        if ( ! $product ) continue;
+
+        $change_qty = $qty_sign < 0 ? ( -1 * $qty ) : $qty;
+        $new_qty = wc_suf_get_order_stock_qty_by_source( $product, $stock_source );
+        $old_qty = $new_qty - $change_qty;
+        $product_name = (string) ( $item->get_name() ?: $product->get_name() );
+        $purpose = $purpose_prefix . ' | ' . (string) $stock_source['label'];
+
+        $wpdb->insert(
+            $move_table,
+            [
+                'batch_code' => $order_number,
+                'operation' => $operation,
+                'destination' => (string) $stock_source['destination'],
+                'product_id' => $product_id,
+                'product_name' => $product_name,
+                'sku' => (string) $product->get_sku(),
+                'product_type' => (string) $product->get_type(),
+                'parent_id' => (int) $product->get_parent_id(),
+                'attributes_text' => wc_suf_get_product_attributes_text( $product ),
+                'old_qty' => $old_qty,
+                'change_qty' => $change_qty,
+                'new_qty' => $new_qty,
+                'destination_old_qty' => null,
+                'destination_new_qty' => null,
+                'user_id' => $log_user_id,
+                'user_login' => $log_user_login,
+                'user_code' => $order_number,
+                'created_at' => $created_at_mysql,
+            ],
+            [
+                '%s','%s','%s','%d','%s','%s','%s','%d','%s',
+                '%f','%f','%f','%f','%f','%d','%s','%s','%s'
+            ]
+        );
+
+        $wpdb->insert(
+            $audit_table,
+            [
+                'batch_code'   => $order_number,
+                'csv_file_url' => null,
+                'word_file_url'=> null,
+                'op_type'      => $operation,
+                'purpose'      => $purpose,
+                'print_label'  => 0,
+                'product_id'   => $product_id,
+                'product_name' => $product_name,
+                'old_qty'      => $old_qty,
+                'added_qty'    => $change_qty,
+                'new_qty'      => $new_qty,
+                'user_id'      => $log_user_id,
+                'user_login'   => $log_user_login,
+                'user_code'    => $order_number,
+                'ip'           => '',
+                'created_at'   => $created_at_mysql,
+            ],
+            [
+                '%s','%s','%s','%s','%s','%d','%d','%s','%f',
+                '%f','%f','%d','%s','%s','%s','%s'
+            ]
+        );
+    }
+}
 
 add_action( 'init', function() {
     register_post_status( 'wc-initialorder', [
@@ -81,6 +197,7 @@ add_action( 'woocommerce_order_status_instaformremove', function( $order_id ) {
         if ( ! $product ) continue;
         wc_update_product_stock( $product, $qty, 'increase' );
     }
+    wc_suf_log_sale_hold_event( $order, 'sale_hold_release', 'برگشت موجودی به‌دلیل انقضای هولد سفارش', 1 );
     $order->update_meta_data( '_wc_suf_hold_stock_released', 'yes' );
     $order->save_meta_data();
 }, 20 );
