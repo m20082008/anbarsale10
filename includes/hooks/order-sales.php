@@ -1,6 +1,9 @@
 <?php
 function wc_suf_get_sale_hold_minutes() {
-    $minutes = (int) get_option( 'wc_suf_sale_hold_minutes', 30 );
+    $minutes = (int) get_option( 'woocommerce_hold_stock_minutes', 0 );
+    if ( $minutes <= 0 ) {
+        $minutes = (int) get_option( 'wc_suf_sale_hold_minutes', 30 );
+    }
     return max( 1, $minutes );
 }
 
@@ -22,7 +25,8 @@ function wc_suf_expire_sale_hold_order( $order_id ) {
     $order = wc_get_order( $order_id );
     if ( ! $order ) return;
     if ( $order->get_created_via() !== 'wc_suf_manual_sale_hold' ) return;
-    if ( ! $order->has_status( [ 'pending', 'initialorder' ] ) ) return;
+    if ( ! $order->has_status( [ 'pending', 'on-hold', 'initialorder' ] ) ) return;
+    wc_suf_release_stock_for_hold_order( $order, 'انقضای زمان هولد فرم فروش اینستا.' );
     $order->set_status( 'instaformremove', 'انقضای زمان هولد فرم فروش اینستا.' );
     $order->save();
 }
@@ -60,30 +64,58 @@ add_filter( 'woocommerce_can_reduce_order_stock', function( $can_reduce, $order 
 
     $created_via = (string) $order->get_created_via();
     if ( in_array( $created_via, [ 'wc_suf_manual_sale', 'wc_suf_manual_sale_hold' ], true ) ) {
+        if ( 'yes' !== $order->get_meta( '_wc_suf_sale_hold_active', true ) ) {
+            return $can_reduce;
+        }
         return false;
     }
 
     return $can_reduce;
 }, 20, 2 );
 
-add_action( 'woocommerce_order_status_instaformremove', function( $order_id ) {
-    $order = wc_get_order( $order_id );
-    if ( ! $order ) return;
-    if ( 'yes' === $order->get_meta( '_wc_suf_hold_stock_released', true ) ) return;
-    foreach ( $order->get_items( 'line_item' ) as $item ) {
-        if ( ! is_a( $item, 'WC_Order_Item_Product' ) ) continue;
-        $pid = (int) $item->get_variation_id();
-        if ( $pid <= 0 ) $pid = (int) $item->get_product_id();
-        if ( $pid <= 0 ) continue;
-        $qty = max( 0, (float) $item->get_quantity() );
-        if ( $qty <= 0 ) continue;
-        $product = wc_get_product( $pid );
-        if ( ! $product ) continue;
-        wc_update_product_stock( $product, $qty, 'increase' );
+function wc_suf_reserve_stock_for_hold_order( $order ) {
+    $order = is_a( $order, 'WC_Order' ) ? $order : wc_get_order( $order );
+    if ( ! $order ) {
+        return new WP_Error( 'invalid_order', 'سفارش معتبر نیست.' );
     }
-    $order->update_meta_data( '_wc_suf_hold_stock_released', 'yes' );
+    if ( ! function_exists( 'wc_reserve_stock_for_order' ) ) {
+        return true;
+    }
+
+    wc_suf_release_stock_for_hold_order( $order, 'به‌روزرسانی آیتم‌های سفارش هولد.' );
+    try {
+        wc_reserve_stock_for_order( $order );
+    } catch ( Exception $e ) {
+        return new WP_Error( 'reserve_failed', $e->getMessage() );
+    }
+    $order->update_meta_data( '_wc_suf_hold_stock_released', 'no' );
+    $order->add_order_note( 'رزرو موجودی ووکامرس برای سفارش هولد به‌روزرسانی شد.' );
     $order->save_meta_data();
-}, 20 );
+
+    return true;
+}
+
+function wc_suf_release_stock_for_hold_order( $order, $reason = '' ) {
+    $order = is_a( $order, 'WC_Order' ) ? $order : wc_get_order( $order );
+    if ( ! $order ) {
+        return;
+    }
+    if ( 'yes' === $order->get_meta( '_wc_suf_hold_stock_released', true ) ) {
+        return;
+    }
+    if ( ! function_exists( 'wc_release_stock_for_order' ) ) {
+        return;
+    }
+
+    wc_release_stock_for_order( $order );
+    $order->update_meta_data( '_wc_suf_hold_stock_released', 'yes' );
+    if ( $reason !== '' ) {
+        $order->add_order_note( 'آزادسازی رزرو موجودی ووکامرس: ' . $reason );
+    } else {
+        $order->add_order_note( 'آزادسازی رزرو موجودی ووکامرس انجام شد.' );
+    }
+    $order->save_meta_data();
+}
 
 add_action( 'admin_menu', function() {
     $cap = current_user_can('manage_woocommerce') ? 'manage_woocommerce' : 'manage_options';
@@ -130,7 +162,7 @@ function wc_suf_log_woocommerce_order_sale( $order_id ) {
     if ( 'yes' === $order->get_meta('_wc_suf_sale_logged', true) ) {
         return;
     }
-    if ( 'yes' === $order->get_meta('_wc_suf_sale_hold_active', true ) && $order->has_status( [ 'pending', 'initialorder' ] ) ) {
+    if ( 'yes' === $order->get_meta('_wc_suf_sale_hold_active', true ) && $order->has_status( [ 'pending', 'on-hold', 'initialorder' ] ) ) {
         return;
     }
 
