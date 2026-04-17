@@ -46,6 +46,50 @@ function wc_suf_expire_sale_hold_order( $order_id ) {
 }
 add_action( 'wc_suf_sale_hold_expire_event', 'wc_suf_expire_sale_hold_order', 10, 1 );
 
+function wc_suf_maybe_expire_overdue_sale_hold_orders() {
+    if ( ! function_exists( 'wc_get_orders' ) ) {
+        return;
+    }
+
+    $now = time();
+    $orders = wc_get_orders( [
+        'type'         => 'shop_order',
+        'status'       => [ 'initialorder', 'pending' ],
+        'limit'        => 25,
+        'return'       => 'ids',
+        'meta_query'   => [
+            [
+                'key'     => '_wc_suf_sale_hold_active',
+                'value'   => 'yes',
+                'compare' => '=',
+            ],
+            [
+                'key'     => '_wc_suf_sale_hold_expires_at',
+                'value'   => $now,
+                'type'    => 'NUMERIC',
+                'compare' => '<=',
+            ],
+        ],
+    ] );
+
+    if ( empty( $orders ) ) {
+        return;
+    }
+
+    foreach ( $orders as $order_id ) {
+        wc_suf_expire_sale_hold_order( (int) $order_id );
+    }
+}
+add_action( 'init', 'wc_suf_maybe_expire_overdue_sale_hold_orders', 20 );
+
+add_action( 'woocommerce_order_status_initialorder', function( $order_id ) {
+    $order = wc_get_order( $order_id );
+    if ( ! $order ) return;
+    if ( $order->get_created_via() !== 'wc_suf_manual_sale_hold' ) return;
+    if ( 'yes' !== $order->get_meta( '_wc_suf_sale_hold_active', true ) ) return;
+    wc_suf_schedule_sale_hold_expiry( $order_id );
+}, 20 );
+
 function wc_suf_log_sale_hold_event( $order, $operation, $purpose_prefix, $qty_sign = -1 ) {
     if ( ! $order || ! is_a( $order, 'WC_Order' ) ) {
         return;
