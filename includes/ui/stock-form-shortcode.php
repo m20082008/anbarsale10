@@ -467,6 +467,13 @@ add_shortcode('stock_update_form', function($atts){
         function findLabelById(id){ const f = findById(id); return f ? f.label : ''; }
         function findProductionStockById(id){ const f = findById(id); return f ? (+f.prod_stock || 0) : 0; }
         function findMainStockById(id){ const f = findById(id); return f ? (+f.wc_stock || 0) : 0; }
+        function adjustMainStockInMemory(id, delta){
+            const product = findById(id);
+            if(!product) return;
+            const current = +product.wc_stock || 0;
+            const next = current + (+delta || 0);
+            product.wc_stock = Math.max(0, Math.floor(next));
+        }
         function warehouseLabel(code){
             if(code === 'main') return 'انبار اصلی';
             if(code === 'teh') return 'انبار تهران پارس';
@@ -1451,9 +1458,17 @@ add_shortcode('stock_update_form', function($atts){
         });
 
         $('#items-table').on('click','.btn-del',function(){
-            items.splice($(this).data('i'),1);
+            const i = +$(this).data('i');
+            const removed = items[i];
+            if((opType === 'sale' || opType === 'sale_teh') && removed && removed.id){
+                adjustMainStockInMemory(removed.id, +removed.qty || 0);
+            }
+            items.splice(i,1);
             renderTable();
             syncSaleHoldOrder(true);
+            if((opType === 'sale' || opType === 'sale_teh') && removed && removed.id){
+                scheduleSaleStocksRefresh([removed.id], 250);
+            }
         });
 
         let submitting = false;
