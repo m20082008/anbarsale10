@@ -48,12 +48,14 @@ function wc_suf_sync_sale_hold_order_handler(){
         $ulog = (string) ( $user->display_name ?: $user->user_login );
     }
 
+    $created_new_hold_order = false;
     if ( $order_id > 0 ) {
         $order = wc_get_order( $order_id );
     } else {
         $order = wc_create_order();
+        $created_new_hold_order = true;
         $order->set_created_via( 'wc_suf_manual_sale_hold' );
-        $order->set_status( 'initialorder', 'ایجاد اولیه سفارش هولد از فرم فروش.' );
+        $order->set_status( 'on-hold', 'ایجاد اولیه سفارش هولد از فرم فروش.' );
     }
     if ( ! $order ) {
         wp_send_json_error(['message'=>'دسترسی به سفارش هولد ممکن نیست.']);
@@ -73,21 +75,7 @@ function wc_suf_sync_sale_hold_order_handler(){
     }
 
     foreach ( $existing_items as $pid => $entry ) {
-        $old_qty = max(0, (int) $entry['item']->get_quantity());
         $new_qty = max(0, (int) ($desired[ $pid ] ?? 0));
-        $delta = $new_qty - $old_qty;
-        if ( $delta > 0 ) {
-            $product = wc_get_product( $pid );
-            $have = (int) ( $product ? $product->get_stock_quantity() : 0 );
-            if ( $delta > $have ) {
-                wp_send_json_error(['message'=>sprintf('موجودی محصول #%d کافی نیست.', $pid)]);
-            }
-            wc_update_product_stock( $product, $delta, 'decrease' );
-        } elseif ( $delta < 0 ) {
-            $product = wc_get_product( $pid );
-            wc_update_product_stock( $product, abs($delta), 'increase' );
-        }
-
         if ( $new_qty <= 0 ) {
             $order->remove_item( $entry['item_id'] );
         } else {
@@ -100,12 +88,7 @@ function wc_suf_sync_sale_hold_order_handler(){
     foreach ( $desired as $pid => $qty ) {
         $product = wc_get_product( $pid );
         if ( ! $product || $qty <= 0 ) continue;
-        $have = (int) ( $product->get_stock_quantity() ?? 0 );
-        if ( $qty > $have ) {
-            wp_send_json_error(['message'=>sprintf('موجودی محصول #%d کافی نیست.', $pid)]);
-        }
         $order->add_product( $product, $qty );
-        wc_update_product_stock( $product, $qty, 'decrease' );
     }
 
     $order->set_address([
@@ -123,8 +106,17 @@ function wc_suf_sync_sale_hold_order_handler(){
     $order->update_meta_data( '_wc_suf_sale_customer_name', $customer_name );
     $order->update_meta_data( '_wc_suf_sale_customer_mobile', $customer_mobile );
     $order->update_meta_data( '_wc_suf_sale_customer_address', $customer_address );
+    if ( $created_new_hold_order ) {
+        $order->add_order_note( 'ایجاد سفارش هولد از فرم فروش.' );
+    } else {
+        $order->add_order_note( 'به‌روزرسانی سفارش هولد از فرم فروش.' );
+    }
     $order->calculate_totals();
     $order->save();
+    $reserve_result = wc_suf_reserve_stock_for_hold_order( $order );
+    if ( is_wp_error( $reserve_result ) ) {
+        wp_send_json_error(['message' => $reserve_result->get_error_message()]);
+    }
 
     wc_suf_schedule_sale_hold_expiry( $order->get_id() );
 
@@ -657,12 +649,11 @@ function wc_suf_save_stock_update_handler(){
             $sale_order->update_meta_data( '_wc_suf_sale_customer_name', $sale_customer_name );
             $sale_order->update_meta_data( '_wc_suf_sale_customer_mobile', $sale_customer_mobile );
             $sale_order->update_meta_data( '_wc_suf_sale_customer_address', $sale_customer_address );
+            $sale_order->add_order_note( 'ثبت نهایی فروش از فرم انبار؛ وضعیت سفارش به در حال انجام تغییر یافت.' );
             $sale_order->calculate_totals();
             $sale_order->set_status( 'processing', 'ثبت سفارش از فرم عملیات فروش انبار تولید.' );
             $sale_order->save();
-            if ( $sale_hold_order_id <= 0 ) {
-                wc_reduce_stock_levels( $sale_order->get_id() );
-            }
+            wc_reduce_stock_levels( $sale_order->get_id() );
             wc_suf_clear_sale_hold_expiry( $sale_order->get_id() );
         } catch ( Exception $e ) {
             if ( $tx_started ) {
