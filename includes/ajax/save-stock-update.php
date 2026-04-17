@@ -246,6 +246,35 @@ function wc_suf_save_stock_update_handler(){
         }
     }
 
+    $sale_hold_reserved_qty = [];
+    if ( ( $op_type === 'sale' || $op_type === 'sale_teh' ) && $sale_hold_order_id > 0 ) {
+        $sale_hold_order = wc_get_order( $sale_hold_order_id );
+        if ( ! $sale_hold_order ) {
+            if ( $tx_started ) {
+                $wpdb->query('ROLLBACK');
+            }
+            wp_send_json_error(['message'=>'سفارش اولیه فروش برای بررسی موجودی یافت نشد.']);
+        }
+
+        foreach ( $sale_hold_order->get_items( 'line_item' ) as $hold_item ) {
+            if ( ! is_a( $hold_item, 'WC_Order_Item_Product' ) ) {
+                continue;
+            }
+            $hold_pid = (int) $hold_item->get_variation_id();
+            if ( $hold_pid <= 0 ) {
+                $hold_pid = (int) $hold_item->get_product_id();
+            }
+            if ( $hold_pid <= 0 ) {
+                continue;
+            }
+            $hold_qty = max( 0, (int) $hold_item->get_quantity() );
+            if ( $hold_qty <= 0 ) {
+                continue;
+            }
+            $sale_hold_reserved_qty[ $hold_pid ] = ( $sale_hold_reserved_qty[ $hold_pid ] ?? 0 ) + $hold_qty;
+        }
+    }
+
     if ($op_type === 'out' || $op_type === 'transfer' || $op_type === 'sale' || $op_type === 'sale_teh') {
         $insufficient = [];
         $locked_old_qty = [];
@@ -281,12 +310,17 @@ function wc_suf_save_stock_update_handler(){
             $pname = wc_suf_full_product_label( $product );
             $locked_old_qty[$pid] = $old;
 
-            if( $req > $old ){
+            $effective_available = $old;
+            if ( $op_type === 'sale' || $op_type === 'sale_teh' ) {
+                $effective_available += (int) ( $sale_hold_reserved_qty[ $pid ] ?? 0 );
+            }
+
+            if( $req > $effective_available ){
                 $insufficient[] = [
                     'id'   => $pid,
                     'name' => $pname,
                     'req'  => $req,
-                    'have' => $old,
+                    'have' => $effective_available,
                 ];
             }
         }
