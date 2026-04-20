@@ -998,9 +998,16 @@ function wc_suf_log_order_item_differences_after_save( $order_id, $items ) {
         $old_qty = $current_main_stock - $change_qty;
         $new_qty = $current_main_stock;
         $direction = ( $change_qty > 0 ) ? 'increase' : 'decrease';
+        $item_change_label = 'ویرایش تعداد';
+        if ( $before_qty_in_order <= 0 && $after_qty_in_order > 0 ) {
+            $item_change_label = 'افزودن محصول به سفارش';
+        } elseif ( $before_qty_in_order > 0 && $after_qty_in_order <= 0 ) {
+            $item_change_label = 'حذف محصول از سفارش';
+        }
         $purpose = sprintf(
-            'ویرایش سفارش #%s | تغییر اقلام سفارش: %s → %s | %s موجودی انبار اصلی: %s → %s',
+            'ویرایش سفارش #%s | %s | اقلام سفارش: %s → %s | %s موجودی انبار اصلی: %s → %s',
             $order_number,
+            $item_change_label,
             wc_format_decimal( $before_qty_in_order, 4 ),
             wc_format_decimal( $after_qty_in_order, 4 ),
             ( $direction === 'increase' ? 'افزایش' : 'کاهش' ),
