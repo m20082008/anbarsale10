@@ -967,6 +967,28 @@ function wc_suf_track_order_before_save_for_diff( $order_id, $items ) {
     // قبل از اعمال تغییرات آیتم‌های سفارش در ادمین، موجودی واقعی محصولات مدیریت‌شونده را ثبت می‌کنیم.
     $snapshot = wc_suf_capture_order_stock_snapshot( $order );
     $snapshot['attempted_after_qty_by_product'] = wc_suf_parse_admin_order_items_qty_totals_by_product( $items );
+
+    // برای محصولاتی که در همین ویرایش به سفارش اضافه می‌شوند (و قبلاً در سفارش نبودند)
+    // موجودی قبل از ذخیره را هم ثبت می‌کنیم تا old_qty دقیق انبار داشته باشیم.
+    if ( ! isset( $snapshot['stock_qty_by_product'] ) || ! is_array( $snapshot['stock_qty_by_product'] ) ) {
+        $snapshot['stock_qty_by_product'] = [];
+    }
+    foreach ( (array) $snapshot['attempted_after_qty_by_product'] as $managed_product_id => $qty ) {
+        $managed_product_id = (int) $managed_product_id;
+        if ( $managed_product_id <= 0 ) {
+            continue;
+        }
+        if ( isset( $snapshot['stock_qty_by_product'][ $managed_product_id ] ) ) {
+            continue;
+        }
+        $stock_product = wc_suf_get_stock_product( wc_get_product( $managed_product_id ) );
+        if ( ! $stock_product || ! $stock_product->managing_stock() ) {
+            continue;
+        }
+        $stock_qty = $stock_product->get_stock_quantity();
+        $snapshot['stock_qty_by_product'][ $managed_product_id ] = ( $stock_qty === null ) ? 0.0 : (float) $stock_qty;
+    }
+
     $GLOBALS['wc_suf_order_edit_stock_snapshots'][ $order_id ] = $snapshot;
 }
 add_action( 'woocommerce_before_save_order_items', 'wc_suf_track_order_before_save_for_diff', 5, 2 );
@@ -1001,6 +1023,9 @@ function wc_suf_log_order_item_differences_after_save( $order_id, $items ) {
 
     $before_order_qty = isset( $before['order_qty_by_product'] ) && is_array( $before['order_qty_by_product'] )
         ? $before['order_qty_by_product']
+        : [];
+    $before_stock_qty = isset( $before['stock_qty_by_product'] ) && is_array( $before['stock_qty_by_product'] )
+        ? $before['stock_qty_by_product']
         : [];
     $after_order_qty = isset( $before['attempted_after_qty_by_product'] ) && is_array( $before['attempted_after_qty_by_product'] )
         ? $before['attempted_after_qty_by_product']
@@ -1059,12 +1084,15 @@ function wc_suf_log_order_item_differences_after_save( $order_id, $items ) {
             continue;
         }
 
-        $current_main_stock = isset( $after_stock_qty[ $product_id ] )
-            ? (float) $after_stock_qty[ $product_id ]
-            : (float) $stock_product->get_stock_quantity();
-        $change_qty = -1 * $order_qty_delta;
-        $old_qty = $current_main_stock - $change_qty;
-        $new_qty = $current_main_stock;
+        $fallback_stock_qty = (float) $stock_product->get_stock_quantity();
+        $old_qty = isset( $before_stock_qty[ $product_id ] ) ? (float) $before_stock_qty[ $product_id ] : $fallback_stock_qty;
+        $new_qty = isset( $after_stock_qty[ $product_id ] ) ? (float) $after_stock_qty[ $product_id ] : $fallback_stock_qty;
+        $change_qty = $new_qty - $old_qty;
+        if ( abs( $change_qty ) < 0.0001 ) {
+            // اگر موجودی از اسنپ‌شات‌ها قابل تشخیص نبود، از تغییر اقلام سفارش برای محاسبه استفاده می‌کنیم.
+            $change_qty = -1 * $order_qty_delta;
+            $old_qty = $new_qty - $change_qty;
+        }
         $direction = ( $change_qty > 0 ) ? 'increase' : 'decrease';
         $item_change_label = 'ویرایش تعداد';
         if ( $before_qty_in_order <= 0 && $after_qty_in_order > 0 ) {
