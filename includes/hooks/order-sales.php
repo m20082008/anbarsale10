@@ -637,11 +637,7 @@ function wc_suf_is_manual_admin_order_edit_request() {
     }
 
     $action = isset( $_REQUEST['action'] ) ? sanitize_key( wp_unslash( $_REQUEST['action'] ) ) : '';
-    if ( $action !== 'woocommerce_save_order_items' ) {
-        return false;
-    }
-
-    if ( ! current_user_can( 'edit_shop_orders' ) ) {
+    if ( $action !== '' && ! in_array( $action, [ 'woocommerce_save_order_items', 'woocommerce_add_order_item', 'woocommerce_remove_order_item' ], true ) ) {
         return false;
     }
 
@@ -1027,9 +1023,18 @@ function wc_suf_log_order_item_differences_after_save( $order_id, $items ) {
     $before_stock_qty = isset( $before['stock_qty_by_product'] ) && is_array( $before['stock_qty_by_product'] )
         ? $before['stock_qty_by_product']
         : [];
-    $after_order_qty = isset( $before['attempted_after_qty_by_product'] ) && is_array( $before['attempted_after_qty_by_product'] )
-        ? $before['attempted_after_qty_by_product']
-        : ( isset( $after['order_qty_by_product'] ) && is_array( $after['order_qty_by_product'] ) ? $after['order_qty_by_product'] : [] );
+    $after_order_qty = isset( $after['order_qty_by_product'] ) && is_array( $after['order_qty_by_product'] )
+        ? $after['order_qty_by_product']
+        : [];
+    if ( isset( $before['attempted_after_qty_by_product'] ) && is_array( $before['attempted_after_qty_by_product'] ) ) {
+        foreach ( $before['attempted_after_qty_by_product'] as $attempted_product_id => $attempted_qty ) {
+            $attempted_product_id = (int) $attempted_product_id;
+            if ( $attempted_product_id <= 0 ) {
+                continue;
+            }
+            $after_order_qty[ $attempted_product_id ] = max( 0, (float) $attempted_qty );
+        }
+    }
     $after_stock_qty = isset( $after['stock_qty_by_product'] ) && is_array( $after['stock_qty_by_product'] )
         ? $after['stock_qty_by_product']
         : [];
