@@ -879,6 +879,72 @@ function wc_suf_capture_order_stock_snapshot( $order ) {
     return $snapshot;
 }
 
+function wc_suf_parse_admin_order_items_qty_totals_by_product( $items ) {
+    if ( is_string( $items ) ) {
+        parse_str( wp_unslash( $items ), $items );
+    }
+    $items = (array) $items;
+
+    $qty_map = isset( $items['order_item_qty'] ) && is_array( $items['order_item_qty'] )
+        ? $items['order_item_qty']
+        : [];
+    $variation_map = isset( $items['order_item_variation_id'] ) && is_array( $items['order_item_variation_id'] )
+        ? $items['order_item_variation_id']
+        : [];
+    $product_map = isset( $items['order_item_product_id'] ) && is_array( $items['order_item_product_id'] )
+        ? $items['order_item_product_id']
+        : [];
+
+    $totals = [];
+    foreach ( $qty_map as $item_key => $qty_raw ) {
+        $qty = wc_stock_amount( wc_clean( wp_unslash( $qty_raw ) ) );
+        $qty = max( 0, (float) $qty );
+        if ( $qty <= 0 ) {
+            continue;
+        }
+
+        $product_id = 0;
+        if ( isset( $variation_map[ $item_key ] ) ) {
+            $product_id = absint( $variation_map[ $item_key ] );
+        }
+        if ( $product_id <= 0 && isset( $product_map[ $item_key ] ) ) {
+            $product_id = absint( $product_map[ $item_key ] );
+        }
+
+        if ( $product_id <= 0 && absint( $item_key ) > 0 ) {
+            $order_item = WC_Order_Factory::get_order_item( absint( $item_key ) );
+            if ( is_a( $order_item, 'WC_Order_Item_Product' ) ) {
+                $item_product = $order_item->get_product();
+                if ( $item_product ) {
+                    $stock_product = wc_suf_get_stock_product( $item_product );
+                    $product_id = $stock_product ? (int) $stock_product->get_id() : 0;
+                }
+            }
+        }
+
+        if ( $product_id <= 0 ) {
+            continue;
+        }
+
+        $stock_product = wc_suf_get_stock_product( wc_get_product( $product_id ) );
+        if ( ! $stock_product || ! $stock_product->managing_stock() ) {
+            continue;
+        }
+
+        $managed_product_id = (int) $stock_product->get_id();
+        if ( $managed_product_id <= 0 ) {
+            continue;
+        }
+
+        if ( ! isset( $totals[ $managed_product_id ] ) ) {
+            $totals[ $managed_product_id ] = 0.0;
+        }
+        $totals[ $managed_product_id ] += $qty;
+    }
+
+    return $totals;
+}
+
 function wc_suf_track_order_before_save_for_diff( $order_id, $items ) {
     if ( ! wc_suf_is_manual_admin_order_edit_request() ) {
         return;
@@ -899,7 +965,9 @@ function wc_suf_track_order_before_save_for_diff( $order_id, $items ) {
     }
 
     // قبل از اعمال تغییرات آیتم‌های سفارش در ادمین، موجودی واقعی محصولات مدیریت‌شونده را ثبت می‌کنیم.
-    $GLOBALS['wc_suf_order_edit_stock_snapshots'][ $order_id ] = wc_suf_capture_order_stock_snapshot( $order );
+    $snapshot = wc_suf_capture_order_stock_snapshot( $order );
+    $snapshot['attempted_after_qty_by_product'] = wc_suf_parse_admin_order_items_qty_totals_by_product( $items );
+    $GLOBALS['wc_suf_order_edit_stock_snapshots'][ $order_id ] = $snapshot;
 }
 add_action( 'woocommerce_before_save_order_items', 'wc_suf_track_order_before_save_for_diff', 5, 2 );
 
@@ -934,9 +1002,9 @@ function wc_suf_log_order_item_differences_after_save( $order_id, $items ) {
     $before_order_qty = isset( $before['order_qty_by_product'] ) && is_array( $before['order_qty_by_product'] )
         ? $before['order_qty_by_product']
         : [];
-    $after_order_qty = isset( $after['order_qty_by_product'] ) && is_array( $after['order_qty_by_product'] )
-        ? $after['order_qty_by_product']
-        : [];
+    $after_order_qty = isset( $before['attempted_after_qty_by_product'] ) && is_array( $before['attempted_after_qty_by_product'] )
+        ? $before['attempted_after_qty_by_product']
+        : ( isset( $after['order_qty_by_product'] ) && is_array( $after['order_qty_by_product'] ) ? $after['order_qty_by_product'] : [] );
     $after_stock_qty = isset( $after['stock_qty_by_product'] ) && is_array( $after['stock_qty_by_product'] )
         ? $after['stock_qty_by_product']
         : [];
