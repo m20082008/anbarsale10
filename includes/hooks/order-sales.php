@@ -622,6 +622,11 @@ function wc_suf_restore_stock_for_cancelled_order( $order_id ) {
 }
 add_action( 'woocommerce_order_status_cancelled', 'wc_suf_restore_stock_for_cancelled_order', 30 );
 
+
+function wc_suf_get_admin_order_items_action() {
+    return isset( $_REQUEST['action'] ) ? sanitize_key( wp_unslash( $_REQUEST['action'] ) ) : '';
+}
+
 function wc_suf_is_manual_admin_order_edit_request() {
     if ( ! is_admin() ) {
         return false;
@@ -778,6 +783,9 @@ function wc_suf_abort_admin_order_items_save_with_errors( $messages ) {
 
 function wc_suf_validate_admin_order_item_qty_against_stock( $order_id, $items ) {
     if ( ! wc_suf_is_manual_admin_order_edit_request() ) {
+        return;
+    }
+    if ( wc_suf_get_admin_order_items_action() !== 'woocommerce_save_order_items' ) {
         return;
     }
 
@@ -945,6 +953,9 @@ function wc_suf_track_order_before_save_for_diff( $order_id, $items ) {
     if ( ! wc_suf_is_manual_admin_order_edit_request() ) {
         return;
     }
+    if ( wc_suf_get_admin_order_items_action() !== 'woocommerce_save_order_items' ) {
+        return;
+    }
 
     $order_id = (int) $order_id;
     if ( $order_id <= 0 ) {
@@ -990,12 +1001,12 @@ function wc_suf_track_order_before_save_for_diff( $order_id, $items ) {
 add_action( 'woocommerce_before_save_order_items', 'wc_suf_track_order_before_save_for_diff', 5, 2 );
 
 function wc_suf_log_order_item_differences_after_save( $order_id, $items ) {
-    if ( ! wc_suf_is_manual_admin_order_edit_request() ) {
+    $order_id = (int) $order_id;
+    if ( $order_id <= 0 ) {
         return;
     }
 
-    $order_id = (int) $order_id;
-    if ( $order_id <= 0 ) {
+    if ( ! wc_suf_is_manual_admin_order_edit_request() ) {
         return;
     }
 
