@@ -157,6 +157,9 @@ function wc_suf_sync_sale_hold_order_handler(){
     $order->update_meta_data( '_wc_suf_sale_customer_address', $customer_address );
     $order->update_meta_data( '_wc_suf_sale_method', $sale_method );
     $order->update_meta_data( '_wc_suf_sale_method_label', wc_suf_get_sale_method_labels()[ $sale_method ] );
+    $order->update_meta_data( 'sale_method', $sale_method );
+    $order->update_meta_data( 'sale_method_label', wc_suf_get_sale_method_labels()[ $sale_method ] );
+    $order->update_meta_data( 'نحوه فروش', wc_suf_get_sale_method_labels()[ $sale_method ] );
     $order->calculate_totals();
     $order->save();
 
@@ -705,6 +708,9 @@ function wc_suf_save_stock_update_handler(){
             $sale_order->update_meta_data( '_wc_suf_sale_customer_address', $sale_customer_address );
             $sale_order->update_meta_data( '_wc_suf_sale_method', $sale_method );
             $sale_order->update_meta_data( '_wc_suf_sale_method_label', wc_suf_get_sale_method_labels()[ $sale_method ] );
+            $sale_order->update_meta_data( 'sale_method', $sale_method );
+            $sale_order->update_meta_data( 'sale_method_label', wc_suf_get_sale_method_labels()[ $sale_method ] );
+            $sale_order->update_meta_data( 'نحوه فروش', wc_suf_get_sale_method_labels()[ $sale_method ] );
             $sale_order->calculate_totals();
             $sale_order->set_status( 'processing', 'ثبت سفارش از فرم عملیات فروش انبار تولید.' );
             $sale_order->save();
