@@ -1736,6 +1736,7 @@ add_shortcode('wc_suf_my_sale_orders', function(){
     echo '<th style="padding:8px; border:1px solid #e5e7eb">نحوه فروش</th>';
     echo '<th style="padding:8px; border:1px solid #e5e7eb">تعداد اقلام</th>';
     echo '<th style="padding:8px; border:1px solid #e5e7eb">در انتظار</th>';
+    echo '<th style="padding:8px; border:1px solid #e5e7eb">تکمیل سفارش</th>';
     echo '</tr></thead><tbody>';
 
     foreach ( $orders as $order ) {
@@ -1760,9 +1761,52 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         echo '<td style="padding:8px; border:1px solid #e5e7eb">'.esc_html( $order->get_meta('_wc_suf_sale_method_label', true ) ?: '-' ).'</td>';
         echo '<td style="padding:8px; border:1px solid #e5e7eb; text-align:center">'.esc_html( $item_count ).'</td>';
         echo '<td style="padding:8px; border:1px solid #e5e7eb; text-align:center; color:'.( $pending_qty > 0 ? '#b45309' : '#065f46' ).'; font-weight:700">'.esc_html( $pending_qty ).'</td>';
+        echo '<td style="padding:8px; border:1px solid #e5e7eb; text-align:center">';
+        if ( $pending_qty > 0 && $order->has_status('pendingreview') ) {
+            echo '<button type="button" class="wc-suf-complete-order-btn" data-order-id="'.esc_attr( $order->get_id() ).'" style="padding:8px 10px; border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:8px; cursor:pointer">تکمیل سفارش</button>';
+        } else {
+            echo '<span style="color:#6b7280">—</span>';
+        }
+        echo '</td>';
         echo '</tr>';
     }
-    echo '</tbody></table></div>';
+    echo '</tbody></table>';
+    echo '<div id="wc-suf-complete-order-result" style="display:none; margin-top:10px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:10px; background:#f9fafb"></div>';
+    echo '</div>';
+    ?>
+    <script>
+    jQuery(function($){
+        const ajaxurl = "<?php echo esc_js( admin_url('admin-ajax.php') ); ?>";
+        const nonce = "<?php echo esc_js( wp_create_nonce('wc_suf_complete_pending_sale') ); ?>";
+        $(document).on('click', '.wc-suf-complete-order-btn', function(){
+            const $btn = $(this);
+            const orderId = parseInt($btn.data('order-id'), 10) || 0;
+            if(orderId <= 0) return;
+            $btn.prop('disabled', true).css({opacity:0.7, cursor:'not-allowed'}).text('در حال بررسی...');
+            $.post(ajaxurl, {
+                action: 'wc_suf_complete_pending_sale',
+                order_id: orderId,
+                _wpnonce: nonce
+            }).done(function(res){
+                const ok = !!(res && res.success);
+                const msg = (res && res.data && res.data.message) ? res.data.message : (ok ? 'انجام شد.' : 'ناموفق بود.');
+                $('#wc-suf-complete-order-result')
+                    .html('<div style="font-weight:700; color:'+(ok ? '#065f46' : '#b91c1c')+'">'+msg+'</div>')
+                    .show();
+                if(ok){
+                    setTimeout(function(){ window.location.reload(); }, 600);
+                }
+            }).fail(function(){
+                $('#wc-suf-complete-order-result')
+                    .html('<div style="font-weight:700; color:#b91c1c">خطای ارتباطی در تکمیل سفارش.</div>')
+                    .show();
+            }).always(function(){
+                $btn.prop('disabled', false).css({opacity:1, cursor:'pointer'}).text('تکمیل سفارش');
+            });
+        });
+    });
+    </script>
+    <?php
     return ob_get_clean();
 });
 

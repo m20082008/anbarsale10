@@ -4,6 +4,7 @@
 ---------------------------------------*/
 add_action('wp_ajax_save_stock_update','wc_suf_save_stock_update_handler');
 add_action('wp_ajax_wc_suf_sync_sale_hold_order','wc_suf_sync_sale_hold_order_handler');
+add_action('wp_ajax_wc_suf_complete_pending_sale','wc_suf_complete_pending_sale_handler');
 
 function wc_suf_get_sale_method_labels() {
     return [
@@ -728,9 +729,25 @@ function wc_suf_save_stock_update_handler(){
             $sale_order->update_meta_data( 'نحوه فروش', wc_suf_get_sale_method_labels()[ $sale_method ] );
             $sale_order->update_meta_data( '_wc_suf_sale_submit_mode', $sale_submit_mode );
             $sale_order->update_meta_data( '_wc_suf_pending_breakdown', wp_json_encode( $sale_pending_breakdown, JSON_UNESCAPED_UNICODE ) );
+            $pending_qty_total = 0;
+            $pending_qty_map = [];
+            foreach ( $sale_pending_breakdown as $pending_row ) {
+                $pending_qty = max( 0, (int) ( $pending_row['pending_qty'] ?? 0 ) );
+                if ( $pending_qty <= 0 ) {
+                    continue;
+                }
+                $pending_pid = absint( $pending_row['product_id'] ?? 0 );
+                if ( $pending_pid <= 0 ) {
+                    continue;
+                }
+                $pending_qty_total += $pending_qty;
+                $pending_qty_map[ $pending_pid ] = $pending_qty;
+            }
+            $sale_order->update_meta_data( '_wc_suf_pending_qty_total', $pending_qty_total );
+            $sale_order->update_meta_data( '_wc_suf_pending_qty_map', wp_json_encode( $pending_qty_map, JSON_UNESCAPED_UNICODE ) );
             $sale_order->calculate_totals();
             if ( $sale_submit_mode === 'pending_review' ) {
-                $sale_order->set_status( 'pendingreview', 'ثبت سفارش در وضعیت در انتظار بررسی از فرم فروش.' );
+                $sale_order->set_status( 'pendingreview', 'ثبت سفارش در وضعیت در انتظار از فرم فروش.' );
             } else {
                 $sale_order->set_status( 'processing', 'ثبت سفارش از فرم عملیات فروش انبار تولید.' );
             }
@@ -863,7 +880,7 @@ function wc_suf_save_stock_update_handler(){
 
     $message = "ثبت {$op_label} انجام شد.";
     if ( $is_sale_operation && $sale_submit_mode === 'pending_review' ) {
-        $message = 'سفارش با وضعیت «در انتظار بررسی» ثبت شد.';
+        $message = 'سفارش با وضعیت «در انتظار» ثبت شد.';
     }
     if ( ! $is_sale_operation ) {
         $message .= " کد ثبت: {$batch_code}";
@@ -882,6 +899,137 @@ function wc_suf_save_stock_update_handler(){
         'word_url' => $word_file_url,
         'order_id' => ( $sale_order && $sale_order->get_id() ) ? (int) $sale_order->get_id() : 0,
         'product_ids' => $product_ids,
+    ]);
+}
+
+function wc_suf_complete_pending_sale_handler(){
+    check_ajax_referer('wc_suf_complete_pending_sale');
+
+    if ( ! is_user_logged_in() ) {
+        wp_send_json_error(['message' => 'ابتدا وارد شوید.']);
+    }
+
+    $order_id = isset($_POST['order_id']) ? absint($_POST['order_id']) : 0;
+    if ( $order_id <= 0 ) {
+        wp_send_json_error(['message' => 'شناسه سفارش نامعتبر است.']);
+    }
+
+    $order = wc_get_order( $order_id );
+    if ( ! $order ) {
+        wp_send_json_error(['message' => 'سفارش یافت نشد.']);
+    }
+
+    $current_user_id = get_current_user_id();
+    $seller_id = (int) $order->get_meta('_wc_suf_seller_id', true);
+    if ( $seller_id !== $current_user_id && ! current_user_can('manage_woocommerce') ) {
+        wp_send_json_error(['message' => 'شما دسترسی تکمیل این سفارش را ندارید.']);
+    }
+
+    $pending_raw = (string) $order->get_meta('_wc_suf_pending_breakdown', true);
+    $pending_rows = json_decode( $pending_raw, true );
+    if ( ! is_array($pending_rows) || empty($pending_rows) ) {
+        wp_send_json_error(['message' => 'محصول در انتظاری برای این سفارش ثبت نشده است.']);
+    }
+
+    $updated_breakdown = [];
+    $allocated_now_total = 0;
+    $processed_product_ids = [];
+
+    foreach ( $pending_rows as $row ) {
+        $pid = absint( $row['product_id'] ?? 0 );
+        if ( $pid <= 0 ) {
+            continue;
+        }
+        $requested_qty = max( 0, (int) ( $row['requested_qty'] ?? 0 ) );
+        $already_allocated = max( 0, (int) ( $row['allocated_qty'] ?? 0 ) );
+        $pending_qty = max( 0, (int) ( $row['pending_qty'] ?? 0 ) );
+
+        if ( $pending_qty <= 0 ) {
+            $updated_breakdown[] = [
+                'product_id' => $pid,
+                'product_name' => (string) ( $row['product_name'] ?? '' ),
+                'requested_qty' => $requested_qty,
+                'allocated_qty' => $already_allocated,
+                'pending_qty' => 0,
+            ];
+            continue;
+        }
+
+        $product = wc_get_product( $pid );
+        if ( ! $product ) {
+            $updated_breakdown[] = $row;
+            continue;
+        }
+
+        $available_now = max( 0, (int) ( wc_suf_get_stock_product( $product )->get_stock_quantity() ?? 0 ) );
+        $alloc_now = min( $pending_qty, $available_now );
+        $new_allocated = $already_allocated + $alloc_now;
+        $new_pending = max( 0, $requested_qty - $new_allocated );
+
+        if ( $alloc_now > 0 ) {
+            wc_update_product_stock( $product, $alloc_now, 'decrease' );
+            $allocated_now_total += $alloc_now;
+            $processed_product_ids[] = $pid;
+
+            $line_item_id = 0;
+            foreach ( $order->get_items('line_item') as $item_id => $item ) {
+                if ( ! is_a( $item, 'WC_Order_Item_Product' ) ) continue;
+                $item_pid = (int) $item->get_variation_id();
+                if ( $item_pid <= 0 ) $item_pid = (int) $item->get_product_id();
+                if ( $item_pid === $pid ) {
+                    $line_item_id = (int) $item_id;
+                    break;
+                }
+            }
+            if ( $line_item_id > 0 ) {
+                $item = $order->get_item( $line_item_id );
+                $current_qty = max(0, (int) $item->get_quantity());
+                $item->set_quantity( $current_qty + $alloc_now );
+                $order->add_item( $item );
+            } else {
+                $order->add_product( $product, $alloc_now );
+            }
+        }
+
+        $updated_breakdown[] = [
+            'product_id' => $pid,
+            'product_name' => (string) ( $row['product_name'] ?? $product->get_name() ),
+            'requested_qty' => $requested_qty,
+            'allocated_qty' => $new_allocated,
+            'pending_qty' => $new_pending,
+        ];
+    }
+
+    $pending_qty_total = 0;
+    $pending_qty_map = [];
+    foreach ( $updated_breakdown as $row ) {
+        $pid = absint( $row['product_id'] ?? 0 );
+        $pqty = max(0, (int) ( $row['pending_qty'] ?? 0 ));
+        if ( $pid > 0 && $pqty > 0 ) {
+            $pending_qty_total += $pqty;
+            $pending_qty_map[ $pid ] = $pqty;
+        }
+    }
+
+    $order->update_meta_data( '_wc_suf_pending_breakdown', wp_json_encode( $updated_breakdown, JSON_UNESCAPED_UNICODE ) );
+    $order->update_meta_data( '_wc_suf_pending_qty_total', $pending_qty_total );
+    $order->update_meta_data( '_wc_suf_pending_qty_map', wp_json_encode( $pending_qty_map, JSON_UNESCAPED_UNICODE ) );
+    $order->calculate_totals();
+
+    if ( $pending_qty_total <= 0 ) {
+        $order->set_status( 'processing', 'تکمیل خودکار اقلام در انتظار پس از تامین موجودی.' );
+    } else {
+        $order->set_status( 'pendingreview', 'بخشی از اقلام در انتظار هنوز موجودی کافی ندارند.' );
+    }
+    $order->save();
+
+    wp_send_json_success([
+        'message' => ( $pending_qty_total <= 0 )
+            ? 'سفارش تکمیل شد و به وضعیت «در حال انجام» رفت.'
+            : 'برخی اقلام تخصیص داده شد اما هنوز بخشی در انتظار است.',
+        'allocated_now' => $allocated_now_total,
+        'pending_qty_total' => $pending_qty_total,
+        'product_ids' => array_values( array_unique( array_map( 'absint', $processed_product_ids ) ) ),
     ]);
 }
 
