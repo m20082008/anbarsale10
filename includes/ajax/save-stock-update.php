@@ -6,6 +6,7 @@ add_action('wp_ajax_save_stock_update','wc_suf_save_stock_update_handler');
 add_action('wp_ajax_wc_suf_sync_sale_hold_order','wc_suf_sync_sale_hold_order_handler');
 add_action('wp_ajax_wc_suf_complete_pending_sale','wc_suf_complete_pending_sale_handler');
 add_action('wp_ajax_wc_suf_pending_products_report','wc_suf_pending_products_report_handler');
+add_action('wp_ajax_wc_suf_get_sale_order_for_edit','wc_suf_get_sale_order_for_edit_handler');
 
 function wc_suf_get_sale_method_labels() {
     return [
@@ -151,6 +152,104 @@ function wc_suf_log_pending_sale_allocation( $order, $product, $allocated_qty, $
     );
 }
 
+function wc_suf_validate_sale_order_edit_access( $order, $current_user_id, &$error_message = '' ) {
+    if ( ! $order || ! is_a( $order, 'WC_Order' ) ) {
+        $error_message = 'سفارش یافت نشد.';
+        return false;
+    }
+
+    $seller_id = absint( $order->get_meta('_wc_suf_seller_id', true ) );
+    if ( $seller_id <= 0 || $seller_id !== (int) $current_user_id ) {
+        $error_message = 'شما مالک این سفارش نیستید.';
+        return false;
+    }
+
+    $created_via = (string) $order->get_created_via();
+    if ( ! in_array( $created_via, [ 'wc_suf_manual_sale', 'wc_suf_manual_sale_hold' ], true ) ) {
+        $error_message = 'فقط سفارش‌های فروش دستی قابل ویرایش هستند.';
+        return false;
+    }
+
+    $status = (string) $order->get_status();
+    if ( in_array( $status, [ 'cancelled', 'trash' ], true ) ) {
+        $error_message = 'سفارش لغوشده قابل ویرایش نیست.';
+        return false;
+    }
+
+    return true;
+}
+
+function wc_suf_get_sale_order_for_edit_handler(){
+    check_ajax_referer('wc_suf_get_sale_order_for_edit');
+
+    if( ! wc_suf_current_user_is_pos_manager() ){
+        wp_send_json_error(['message'=>'دسترسی غیرمجاز.']);
+    }
+    if ( ! function_exists( 'wc_get_order' ) ) {
+        wp_send_json_error(['message'=>'ووکامرس فعال نیست.']);
+    }
+
+    $order_id = isset($_POST['order_id']) ? absint($_POST['order_id']) : 0;
+    if ( $order_id <= 0 ) {
+        wp_send_json_error(['message'=>'شماره سفارش نامعتبر است.']);
+    }
+
+    $order = wc_get_order( $order_id );
+    $error_message = '';
+    if ( ! wc_suf_validate_sale_order_edit_access( $order, get_current_user_id(), $error_message ) ) {
+        wp_send_json_error(['message'=> $error_message ?: 'این سفارش قابل ویرایش نیست.']);
+    }
+
+    $sale_method = (string) $order->get_meta('_wc_suf_sale_method', true );
+    $sale_method_label = wc_suf_get_sale_method_labels()[ $sale_method ] ?? '';
+    $sale_op = (string) $order->get_meta('_wc_suf_sale_operation', true );
+    if ( ! in_array( $sale_op, [ 'sale', 'sale_teh' ], true ) ) {
+        $sale_channel = (string) $order->get_meta('_wc_suf_sale_channel', true );
+        $sale_op = ( $sale_channel === 'tehranpars' ) ? 'sale_teh' : 'sale';
+    }
+
+    $pending_map = [];
+    $pending_meta = (string) $order->get_meta('_wc_suf_pending_breakdown', true );
+    $pending_rows = json_decode( $pending_meta, true );
+    if ( is_array($pending_rows) ) {
+        foreach ( $pending_rows as $row ) {
+            $pid = absint( $row['product_id'] ?? 0 );
+            if ( $pid <= 0 ) continue;
+            $pending_map[ $pid ] = max( 0, (int) ( $row['pending_qty'] ?? 0 ) );
+        }
+    }
+
+    $items = [];
+    foreach ( $order->get_items('line_item') as $item ) {
+        if ( ! is_a( $item, 'WC_Order_Item_Product' ) ) continue;
+        $pid = (int) $item->get_variation_id();
+        if ( $pid <= 0 ) $pid = (int) $item->get_product_id();
+        if ( $pid <= 0 ) continue;
+        $qty = max( 0, (int) $item->get_quantity() );
+        if ( $qty <= 0 ) continue;
+        $pending_qty = max( 0, (int) ( $pending_map[ $pid ] ?? 0 ) );
+        $items[] = [
+            'id'            => $pid,
+            'name'          => (string) $item->get_name(),
+            'qty'           => $qty + $pending_qty,
+            'allocated_qty' => $qty,
+            'pending_qty'   => $pending_qty,
+        ];
+    }
+
+    wp_send_json_success([
+        'order_id'               => (int) $order->get_id(),
+        'order_number'           => (string) $order->get_order_number(),
+        'op_type'                => $sale_op,
+        'sale_customer_name'     => (string) $order->get_meta('_wc_suf_sale_customer_name', true ),
+        'sale_customer_mobile'   => (string) $order->get_meta('_wc_suf_sale_customer_mobile', true ),
+        'sale_customer_address'  => (string) $order->get_meta('_wc_suf_sale_customer_address', true ),
+        'sale_method'            => $sale_method,
+        'sale_method_label'      => $sale_method_label,
+        'items'                  => $items,
+    ]);
+}
+
 function wc_suf_sync_sale_hold_order_handler(){
     check_ajax_referer('wc_suf_sync_sale_hold_order');
 
@@ -211,9 +310,11 @@ function wc_suf_sync_sale_hold_order_handler(){
     if ( ! $order ) {
         wp_send_json_error(['message'=>'دسترسی به سفارش هولد ممکن نیست.']);
     }
-
-    if ( $order->get_created_via() !== 'wc_suf_manual_sale_hold' && $order->get_created_via() !== 'wc_suf_manual_sale' ) {
-        wp_send_json_error(['message'=>'این سفارش قابل همگام‌سازی با فرم فروش نیست.']);
+    if ( $order_id > 0 ) {
+        $order_error = '';
+        if ( ! wc_suf_validate_sale_order_edit_access( $order, $uid, $order_error ) ) {
+            wp_send_json_error(['message'=> $order_error ?: 'این سفارش قابل همگام‌سازی با فرم فروش نیست.']);
+        }
     }
 
     $existing_items = [];
