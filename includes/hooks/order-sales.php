@@ -206,10 +206,20 @@ add_action( 'init', function() {
         'show_in_admin_status_list' => true,
         'label_count'               => _n_noop( 'حذف سفارش اینستا <span class="count">(%s)</span>', 'حذف سفارش اینستا <span class="count">(%s)</span>' ),
     ] );
+
+    register_post_status( 'wc-pendingreview', [
+        'label'                     => 'در انتظار',
+        'public'                    => true,
+        'exclude_from_search'       => false,
+        'show_in_admin_all_list'    => true,
+        'show_in_admin_status_list' => true,
+        'label_count'               => _n_noop( 'در انتظار <span class="count">(%s)</span>', 'در انتظار <span class="count">(%s)</span>' ),
+    ] );
 } );
 add_filter( 'wc_order_statuses', function( $statuses ) {
     $statuses['wc-initialorder'] = 'ثبت اولیه سفارش';
     $statuses['wc-instaformremove'] = 'حذف سفارش اینستا';
+    $statuses['wc-pendingreview'] = 'در انتظار';
     return $statuses;
 } );
 
