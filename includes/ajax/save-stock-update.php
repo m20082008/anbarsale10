@@ -5,6 +5,28 @@
 add_action('wp_ajax_save_stock_update','wc_suf_save_stock_update_handler');
 add_action('wp_ajax_wc_suf_sync_sale_hold_order','wc_suf_sync_sale_hold_order_handler');
 
+function wc_suf_get_sale_method_labels() {
+    return [
+        'main_onsite'       => '۱- فروش حضوری انبار اصلی',
+        'tehranpars_onsite' => '۲- فروش حضوری شعبه تهرانپارس',
+        'post'              => '۳- پست',
+        'snap'              => '۴- اسنپ',
+        'tipax'             => '۵- تیپاکس',
+    ];
+}
+
+function wc_suf_validate_sale_method_for_current_user( $raw_method ) {
+    $sale_method = sanitize_text_field( (string) $raw_method );
+    $valid_methods = array_keys( wc_suf_get_sale_method_labels() );
+    if ( ! in_array( $sale_method, $valid_methods, true ) ) {
+        return '';
+    }
+    if ( 'main_onsite' === $sale_method && wc_suf_current_user_has_role( 'tehsale' ) ) {
+        return '';
+    }
+    return $sale_method;
+}
+
 function wc_suf_sync_sale_hold_order_handler(){
     check_ajax_referer('wc_suf_sync_sale_hold_order');
 
@@ -32,6 +54,11 @@ function wc_suf_sync_sale_hold_order_handler(){
     $customer_mobile = isset($_POST['sale_customer_mobile']) ? sanitize_text_field( wp_unslash($_POST['sale_customer_mobile']) ) : '';
     $customer_mobile = preg_replace('/\D+/', '', wc_suf_normalize_digits( $customer_mobile ) );
     $customer_address = isset($_POST['sale_customer_address']) ? sanitize_textarea_field( wp_unslash($_POST['sale_customer_address']) ) : '';
+    $sale_method_raw = isset($_POST['sale_method']) ? wp_unslash($_POST['sale_method']) : '';
+    $sale_method = wc_suf_validate_sale_method_for_current_user( $sale_method_raw );
+    if ( '' === $sale_method ) {
+        wp_send_json_error(['message'=>'نحوه فروش معتبر نیست.']);
+    }
 
     $desired = [];
     foreach ( $items as $it ) {
@@ -128,6 +155,8 @@ function wc_suf_sync_sale_hold_order_handler(){
     $order->update_meta_data( '_wc_suf_sale_customer_name', $customer_name );
     $order->update_meta_data( '_wc_suf_sale_customer_mobile', $customer_mobile );
     $order->update_meta_data( '_wc_suf_sale_customer_address', $customer_address );
+    $order->update_meta_data( '_wc_suf_sale_method', $sale_method );
+    $order->update_meta_data( '_wc_suf_sale_method_label', wc_suf_get_sale_method_labels()[ $sale_method ] );
     $order->calculate_totals();
     $order->save();
 
@@ -180,6 +209,8 @@ function wc_suf_save_stock_update_handler(){
     $sale_customer_mobile = isset($_POST['sale_customer_mobile']) ? sanitize_text_field( wp_unslash($_POST['sale_customer_mobile']) ) : '';
     $sale_customer_mobile = wc_suf_normalize_digits( $sale_customer_mobile );
     $sale_customer_address = isset($_POST['sale_customer_address']) ? sanitize_textarea_field( wp_unslash($_POST['sale_customer_address']) ) : '';
+    $sale_method_raw = isset($_POST['sale_method']) ? wp_unslash($_POST['sale_method']) : '';
+    $sale_method = '';
     $sale_hold_order_id = isset($_POST['sale_hold_order_id']) ? absint($_POST['sale_hold_order_id']) : 0;
     $transfer_store_id = null;
     if ( $op_type === 'out' ) {
@@ -221,6 +252,10 @@ function wc_suf_save_stock_update_handler(){
         }
     }
     if ( $op_type === 'sale' || $op_type === 'sale_teh' ) {
+        $sale_method = wc_suf_validate_sale_method_for_current_user( $sale_method_raw );
+        if ( '' === $sale_method ) {
+            wp_send_json_error(['message'=>'نحوه فروش معتبر نیست.']);
+        }
         if ( mb_strlen( trim( $sale_customer_name ) ) < 3 ) {
             wp_send_json_error(['message'=>'نام و نام خانوادگی مشتری معتبر نیست.']);
         }
@@ -668,6 +703,8 @@ function wc_suf_save_stock_update_handler(){
             $sale_order->update_meta_data( '_wc_suf_sale_customer_name', $sale_customer_name );
             $sale_order->update_meta_data( '_wc_suf_sale_customer_mobile', $sale_customer_mobile );
             $sale_order->update_meta_data( '_wc_suf_sale_customer_address', $sale_customer_address );
+            $sale_order->update_meta_data( '_wc_suf_sale_method', $sale_method );
+            $sale_order->update_meta_data( '_wc_suf_sale_method_label', wc_suf_get_sale_method_labels()[ $sale_method ] );
             $sale_order->calculate_totals();
             $sale_order->set_status( 'processing', 'ثبت سفارش از فرم عملیات فروش انبار تولید.' );
             $sale_order->save();
