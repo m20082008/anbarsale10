@@ -1719,6 +1719,18 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         'meta_value' => $user_id,
     ]);
 
+    $stock_form_url = '';
+    $stock_form_pages = get_posts([
+        'post_type'      => 'page',
+        'post_status'    => 'publish',
+        'posts_per_page' => 1,
+        'fields'         => 'ids',
+        's'              => '[stock_update_form',
+    ]);
+    if ( ! empty( $stock_form_pages ) ) {
+        $stock_form_url = get_permalink( (int) $stock_form_pages[0] );
+    }
+
     ob_start();
     echo '<div dir="rtl" style="display:grid; gap:12px">';
     $pending_report_url = wp_nonce_url(
@@ -1743,10 +1755,33 @@ add_shortcode('wc_suf_my_sale_orders', function(){
     echo '<th style="padding:8px; border:1px solid #e5e7eb">نحوه فروش</th>';
     echo '<th style="padding:8px; border:1px solid #e5e7eb">تعداد اقلام</th>';
     echo '<th style="padding:8px; border:1px solid #e5e7eb">در انتظار</th>';
+    echo '<th style="padding:8px; border:1px solid #e5e7eb">ویرایش</th>';
     echo '<th style="padding:8px; border:1px solid #e5e7eb">تکمیل سفارش</th>';
     echo '</tr></thead><tbody>';
 
     foreach ( $orders as $order ) {
+        $order_id = (int) $order->get_id();
+        $seller_id = absint( $order->get_meta('_wc_suf_seller_id', true ) );
+        $created_via = (string) $order->get_created_via();
+        $status = (string) $order->get_status();
+        $is_manual_sale = in_array( $created_via, [ 'wc_suf_manual_sale', 'wc_suf_manual_sale_hold' ], true );
+        $is_owner = ( $seller_id > 0 && $seller_id === $user_id );
+        $is_cancelled = in_array( $status, [ 'cancelled', 'trash' ], true );
+        $can_edit_order = ( $is_owner && $is_manual_sale && ! $is_cancelled && ! empty( $stock_form_url ) );
+        $edit_url = $can_edit_order ? add_query_arg([
+            'mode'     => 'edit',
+            'order_id' => $order_id,
+        ], $stock_form_url ) : '';
+        $edit_block_reason = '';
+        if ( empty( $stock_form_url ) ) {
+            $edit_block_reason = 'صفحه فرم یافت نشد';
+        } elseif ( ! $is_owner ) {
+            $edit_block_reason = 'مالک سفارش نیستید';
+        } elseif ( ! $is_manual_sale ) {
+            $edit_block_reason = 'فقط فروش دستی قابل ویرایش است';
+        } elseif ( $is_cancelled ) {
+            $edit_block_reason = 'سفارش لغو شده است';
+        }
         $pending_meta = (string) $order->get_meta('_wc_suf_pending_breakdown', true );
         $pending_rows = json_decode( $pending_meta, true );
         $pending_qty = 0;
@@ -1761,13 +1796,31 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         }
 
         echo '<tr>';
-        echo '<td style="padding:8px; border:1px solid #e5e7eb">#'.esc_html( $order->get_order_number() ).'</td>';
+        echo '<td style="padding:8px; border:1px solid #e5e7eb">';
+        if ( $can_edit_order ) {
+            echo '<a href="'.esc_url( $edit_url ).'" style="color:#1d4ed8; font-weight:700; text-decoration:none">#'.esc_html( $order->get_order_number() ).'</a>';
+        } else {
+            echo '#'.esc_html( $order->get_order_number() );
+        }
+        echo '</td>';
         echo '<td style="padding:8px; border:1px solid #e5e7eb">'.esc_html( $order->get_date_created() ? $order->get_date_created()->date_i18n('Y/m/d H:i') : '-' ).'</td>';
         echo '<td style="padding:8px; border:1px solid #e5e7eb">'.esc_html( wc_get_order_status_name( $order->get_status() ) ).'</td>';
         echo '<td style="padding:8px; border:1px solid #e5e7eb">'.esc_html( $order->get_meta('_wc_suf_sale_customer_name', true ) ?: $order->get_formatted_billing_full_name() ).'</td>';
         echo '<td style="padding:8px; border:1px solid #e5e7eb">'.esc_html( $order->get_meta('_wc_suf_sale_method_label', true ) ?: '-' ).'</td>';
         echo '<td style="padding:8px; border:1px solid #e5e7eb; text-align:center">'.esc_html( $item_count ).'</td>';
         echo '<td style="padding:8px; border:1px solid #e5e7eb; text-align:center; color:'.( $pending_qty > 0 ? '#b45309' : '#065f46' ).'; font-weight:700">'.esc_html( $pending_qty ).'</td>';
+        echo '<td style="padding:8px; border:1px solid #e5e7eb; text-align:center">';
+        if ( $can_edit_order ) {
+            echo '<a href="'.esc_url( $edit_url ).'" title="ویرایش سفارش" aria-label="ویرایش سفارش #'.esc_attr( $order->get_order_number() ).'" style="display:inline-flex; align-items:center; gap:4px; padding:6px 10px; border:1px solid #1d4ed8; color:#1d4ed8; border-radius:8px; text-decoration:none; font-weight:700">';
+            echo '<span aria-hidden="true">✏️</span><span>ویرایش</span>';
+            echo '</a>';
+        } else {
+            echo '<span style="color:#9ca3af; font-weight:700">غیرفعال</span>';
+            if ( $edit_block_reason !== '' ) {
+                echo '<div style="margin-top:4px; color:#6b7280; font-size:11px">'.esc_html( $edit_block_reason ).'</div>';
+            }
+        }
+        echo '</td>';
         echo '<td style="padding:8px; border:1px solid #e5e7eb; text-align:center">';
         if ( $pending_qty > 0 && $order->has_status('pendingreview') ) {
             echo '<button type="button" class="wc-suf-complete-order-btn" data-order-id="'.esc_attr( $order->get_id() ).'" style="padding:8px 10px; border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:8px; cursor:pointer">تکمیل سفارش</button>';
