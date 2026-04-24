@@ -363,9 +363,11 @@ add_shortcode('stock_update_form', function($atts){
         </table>
 
         <div id="items-total-wrap" style="display:none; font-weight:700; color:#1f2937">جمع کل تعداد: <span id="items-total-value">0</span></div>
+        <div id="sale-pending-summary" style="display:none; margin-top:8px; padding:10px 12px; border:1px solid #f59e0b; border-radius:10px; background:#fffbeb; color:#92400e; font-weight:700"></div>
 
-        <div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
           <button type="button" id="btn-save" style="margin-top:10px; display:none; padding:12px 18px; cursor:pointer; border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:10px" disabled>✅ ثبت نهایی</button>
+          <button type="button" id="btn-complete-pending" style="margin-top:10px; display:none; padding:12px 18px; cursor:pointer; border:1px solid #dc2626; background:#dc2626; color:#fff; border-radius:10px; font-weight:700">🔴 تکمیل سفارشات در انتظار</button>
         </div>
 
         <div id="save-result" style="display:none; margin-top:8px; padding:10px 12px; border:1px solid #d1d5db; border-radius:10px; background:#f9fafb"></div>
@@ -763,7 +765,11 @@ add_shortcode('stock_update_form', function($atts){
             } else if (isSaleOperation){
                 theadRow.append('<th style="padding:8px; text-align:center; width:170px">موجودی انبار اصلی</th>');
             }
-            theadRow.append('<th style="padding:8px; text-align:center; width:280px">تعداد (+/−)</th>');
+            theadRow.append('<th style="padding:8px; text-align:center; width:280px">' + (isSaleOperation ? 'تعداد درخواستی (+/−)' : 'تعداد (+/−)') + '</th>');
+            if (isSaleOperation){
+                theadRow.append('<th style="padding:8px; text-align:center; width:120px">تخصیص‌یافته</th>');
+                theadRow.append('<th style="padding:8px; text-align:center; width:120px">در انتظار</th>');
+            }
             theadRow.append('<th style="padding:8px; text-align:center; width:100px">حذف</th>');
 
             if(items.length === 0){
@@ -771,11 +777,17 @@ add_shortcode('stock_update_form', function($atts){
                 $('#btn-save').prop('disabled', true).hide();
                 $('#items-total-wrap').hide();
                 $('#items-total-value').text('0');
+                renderSalePendingSummary();
                 return;
             }
             $('#items-table').show();
             $('#btn-save').show().prop('disabled', !canSave());
-            const grandTotal = items.reduce((sum, it) => sum + (parseInt(it.qty, 10) || 0), 0);
+            const grandTotal = items.reduce((sum, it) => {
+                if(isSaleOperation){
+                    return sum + (parseInt(it.req_qty != null ? it.req_qty : it.qty, 10) || 0);
+                }
+                return sum + (parseInt(it.qty, 10) || 0);
+            }, 0);
             $('#items-total-value').text(String(grandTotal));
             $('#items-total-wrap').show();
 
@@ -803,17 +815,28 @@ add_shortcode('stock_update_form', function($atts){
                     tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(mainStock)}</td>`);
                 }
 
+                const rowQty = isSaleOperation
+                    ? (parseInt(it.req_qty != null ? it.req_qty : it.qty, 10) || 0)
+                    : (parseInt(it.qty, 10) || 0);
                 const qtyControls = $(`
                   <td style="padding:6px; text-align:center">
                     <button class="row-dec" data-i="${idx}" style="font-size:18px; padding:4px 10px; margin-inline:4px">➖</button>
-                    <input type="number" class="row-qty" data-i="${idx}" value="${escapeHtml(it.qty)}" min="1" style="width:80px; text-align:center; font-size:16px; padding:4px">
+                    <input type="number" class="row-qty" data-i="${idx}" value="${escapeHtml(rowQty)}" min="1" style="width:80px; text-align:center; font-size:16px; padding:4px">
                     <button class="row-inc" data-i="${idx}" style="font-size:18px; padding:4px 10px; margin-inline:4px">➕</button>
                   </td>
                 `);
                 tr.append(qtyControls);
+                if (isSaleOperation){
+                    const reqQty = Math.max(0, parseInt(it.req_qty != null ? it.req_qty : it.qty, 10) || 0);
+                    const allocQty = Math.max(0, parseInt(it.qty, 10) || 0);
+                    const pendingQty = Math.max(0, reqQty - allocQty);
+                    tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(allocQty)}</td>`);
+                    tr.append(`<td style="padding:8px; text-align:center; color:${pendingQty > 0 ? '#b45309' : '#065f46'}; font-weight:700">${escapeHtml(pendingQty)}</td>`);
+                }
                 tr.append(`<td style="padding:8px; text-align:center"><button data-i="${idx}" class="btn-del" style="cursor:pointer">❌</button></td>`);
                 tbody.append(tr);
             });
+            renderSalePendingSummary();
         }
 
         function buildSubmitConfirmMessage(){
@@ -862,10 +885,55 @@ add_shortcode('stock_update_form', function($atts){
         }
         function enforceSaleLimit(idx){
             if(opType !== 'sale' && opType !== 'sale_teh') return;
-            const it = items[idx];
-            if(!it) return;
-            const sourceStock = findMainStockById(it.id);
-            if(it.qty > sourceStock){ it.qty = sourceStock; }
+            recalculateSaleAllocationForProduct(items[idx] ? items[idx].id : 0);
+        }
+        function recalculateSaleAllocationForProduct(productId){
+            if(opType !== 'sale' && opType !== 'sale_teh') return;
+            const pid = String(productId || '');
+            if(!pid) return;
+            const sameIndexes = [];
+            let remaining = Math.max(0, parseInt(findMainStockById(pid), 10) || 0);
+            for(let i=0; i<items.length; i++){
+                if(String(items[i].id) !== pid) continue;
+                sameIndexes.push(i);
+            }
+            sameIndexes.forEach(function(i){
+                const req = Math.max(0, parseInt(items[i].req_qty != null ? items[i].req_qty : items[i].qty, 10) || 0);
+                items[i].req_qty = req;
+                const alloc = Math.max(0, Math.min(req, remaining));
+                items[i].qty = alloc;
+                items[i].pending_qty = Math.max(0, req - alloc);
+                remaining = Math.max(0, remaining - alloc);
+            });
+        }
+        function recalculateSaleAllocations(){
+            if(opType !== 'sale' && opType !== 'sale_teh') return;
+            const seen = Object.create(null);
+            items.forEach(function(it){
+                const pid = String(it.id || '');
+                if(!pid || seen[pid]) return;
+                seen[pid] = 1;
+                recalculateSaleAllocationForProduct(pid);
+            });
+        }
+        function renderSalePendingSummary(){
+            const $box = $('#sale-pending-summary');
+            if(opType !== 'sale' && opType !== 'sale_teh'){
+                $box.hide().text('');
+                return;
+            }
+            let pTypes = 0, pQty = 0;
+            items.forEach(function(it){
+                const req = Math.max(0, parseInt(it.req_qty != null ? it.req_qty : it.qty, 10) || 0);
+                const alloc = Math.max(0, parseInt(it.qty, 10) || 0);
+                const pending = Math.max(0, req - alloc);
+                if(pending > 0){ pTypes++; pQty += pending; }
+            });
+            if(pQty > 0){
+                $box.text(`اقلام در انتظار: ${pTypes} محصول | مجموع تعداد در انتظار: ${pQty}`).show();
+            } else {
+                $box.hide().text('');
+            }
         }
 
         function openModal(){
@@ -1090,14 +1158,6 @@ add_shortcode('stock_update_form', function($atts){
         }
         function capQtyForSale(pid, qty, showAlert){
             if(opType !== 'sale' && opType !== 'sale_teh') return qty;
-            const stock = findMainStockById(pid);
-            if (qty > stock){
-                if (showAlert){
-                    const name = findLabelById(pid) || ('#'+pid);
-                    alert(`برای "${name}" حداکثر قابل انتخاب ${stock} عدد است (موجودی انبار اصلی).`);
-                }
-                return stock;
-            }
             return qty;
         }
         function lockReturnDestinationIfNeeded(){
@@ -1214,23 +1274,23 @@ add_shortcode('stock_update_form', function($atts){
                             return false;
                         }
                     }
-                    if (opType === 'sale' || opType === 'sale_teh'){
-                        const sourceStock = findMainStockById(pid);
-                        if (qty > sourceStock){
-                            alert(`مقدار انتخابی برای «${name}» بیشتر از موجودی انبار اصلی است.`);
-                            return false;
-                        }
-                    }
-
                     const existingIdx = items.findIndex(x => String(x.id) === String(pid));
                     if (existingIdx >= 0){
-                        items[existingIdx].qty = (items[existingIdx].qty || 0) + qty;
+                        if (opType === 'sale' || opType === 'sale_teh'){
+                            items[existingIdx].req_qty = (items[existingIdx].req_qty || items[existingIdx].qty || 0) + qty;
+                        } else {
+                            items[existingIdx].qty = (items[existingIdx].qty || 0) + qty;
+                        }
                         items[existingIdx].stock = stock;
                         enforceOutLimit(existingIdx);
                         enforceTransferLimit(existingIdx);
                         enforceSaleLimit(existingIdx);
                     } else {
-                        items.push({id: pid, name, qty, stock});
+                        if (opType === 'sale' || opType === 'sale_teh'){
+                            items.push({id: pid, name, qty: 0, req_qty: qty, pending_qty: 0, stock});
+                        } else {
+                            items.push({id: pid, name, qty, stock});
+                        }
                         enforceOutLimit(items.length - 1);
                         enforceTransferLimit(items.length - 1);
                         enforceSaleLimit(items.length - 1);
@@ -1248,6 +1308,7 @@ add_shortcode('stock_update_form', function($atts){
                     if (Object.prototype.hasOwnProperty.call(pickerQty, pid)) pickerQty[pid] = 0;
                 }
 
+                recalculateSaleAllocations();
                 renderTable();
                 syncSaleHoldOrder(true);
                 scheduleSaleStocksRefresh(selectedIds, 1000);
@@ -1315,12 +1376,14 @@ add_shortcode('stock_update_form', function($atts){
                 $('#return-controls-wrap').hide();
                 $('#sale-customer-wrap').css('display','flex');
                 $('#sale-method-wrap').css('display','flex');
+                $('#btn-complete-pending').show();
             } else {
                 $('#out-destination-wrap').hide();
                 $('#transfer-controls-wrap').hide();
                 $('#return-controls-wrap').hide();
                 $('#sale-customer-wrap').hide();
                 $('#sale-method-wrap').hide();
+                $('#btn-complete-pending').hide();
             }
 
             refreshPickerOpenButton();
@@ -1484,18 +1547,37 @@ add_shortcode('stock_update_form', function($atts){
         });
 
         $('#items-table').on('click','.row-inc', function(){
-            const i = +$(this).data('i'); items[i].qty++; enforceOutLimit(i); enforceTransferLimit(i); enforceSaleLimit(i); renderTable();
+            const i = +$(this).data('i');
+            if(opType === 'sale' || opType === 'sale_teh'){
+                items[i].req_qty = (parseInt(items[i].req_qty != null ? items[i].req_qty : items[i].qty, 10) || 0) + 1;
+            } else {
+                items[i].qty++;
+            }
+            enforceOutLimit(i); enforceTransferLimit(i); enforceSaleLimit(i); recalculateSaleAllocations(); renderTable();
             syncSaleHoldOrder(true);
             scheduleSaleStocksRefresh([items[i] ? items[i].id : 0], 1000);
         });
         $('#items-table').on('click','.row-dec', function(){
-            const i = +$(this).data('i'); items[i].qty = Math.max(1, items[i].qty-1); enforceOutLimit(i); enforceTransferLimit(i); enforceSaleLimit(i); renderTable();
+            const i = +$(this).data('i');
+            if(opType === 'sale' || opType === 'sale_teh'){
+                const currentReq = parseInt(items[i].req_qty != null ? items[i].req_qty : items[i].qty, 10) || 1;
+                items[i].req_qty = Math.max(1, currentReq - 1);
+            } else {
+                items[i].qty = Math.max(1, items[i].qty-1);
+            }
+            enforceOutLimit(i); enforceTransferLimit(i); enforceSaleLimit(i); recalculateSaleAllocations(); renderTable();
             syncSaleHoldOrder(true);
             scheduleSaleStocksRefresh([items[i] ? items[i].id : 0], 1000);
         });
         $('#items-table').on('change','.row-qty', function(){
             const i = +$(this).data('i'); let v = +$(this).val();
-            v = Math.max(1, v||1); items[i].qty = v; enforceOutLimit(i); enforceTransferLimit(i); enforceSaleLimit(i); renderTable();
+            v = Math.max(1, v||1);
+            if(opType === 'sale' || opType === 'sale_teh'){
+                items[i].req_qty = v;
+            } else {
+                items[i].qty = v;
+            }
+            enforceOutLimit(i); enforceTransferLimit(i); enforceSaleLimit(i); recalculateSaleAllocations(); renderTable();
             syncSaleHoldOrder(true);
             scheduleSaleStocksRefresh([items[i] ? items[i].id : 0], 1000);
         });
@@ -1507,6 +1589,7 @@ add_shortcode('stock_update_form', function($atts){
                 adjustMainStockInMemory(removed.id, +removed.qty || 0);
             }
             items.splice(i,1);
+            recalculateSaleAllocations();
             renderTable();
             syncSaleHoldOrder(true);
             if((opType === 'sale' || opType === 'sale_teh') && removed && removed.id){
@@ -1515,6 +1598,29 @@ add_shortcode('stock_update_form', function($atts){
         });
 
         let submitting = false;
+        $('#btn-complete-pending').on('click', function(){
+            if(!(opType === 'sale' || opType === 'sale_teh')) return;
+            const $btn = $(this);
+            const originalText = $btn.text();
+            $btn.prop('disabled', true).css({opacity:0.7, cursor:'wait'}).text('در حال تکمیل...');
+            $.post(ajaxurl, {
+                action   : 'wc_suf_complete_pending_sales',
+                _wpnonce : '<?php echo wp_create_nonce('wc_suf_complete_pending_sales'); ?>'
+            }).done(function(res){
+                if(res && res.success && res.data){
+                    const done = parseInt(res.data.completed_orders || 0, 10) || 0;
+                    const touched = parseInt(res.data.touched_orders || 0, 10) || 0;
+                    const remained = parseInt(res.data.remaining_pending_orders || 0, 10) || 0;
+                    alert(`نتیجه تکمیل سفارشات:\n- سفارش بررسی‌شده: ${touched}\n- سفارش کامل‌شده: ${done}\n- سفارش دارای انتظار باقیمانده: ${remained}`);
+                } else {
+                    alert((res && res.data && res.data.message) ? res.data.message : 'خطا در تکمیل سفارشات در انتظار.');
+                }
+            }).fail(function(){
+                alert('خطای ارتباطی هنگام تکمیل سفارشات در انتظار.');
+            }).always(function(){
+                $btn.prop('disabled', false).css({opacity:1, cursor:'pointer'}).text(originalText);
+            });
+        });
         $('#btn-save').on('click', function(){
             if (submitting) return;
             if (!canSave()) return;
@@ -1593,6 +1699,7 @@ add_shortcode('stock_update_form', function($atts){
                             $('#return-controls-wrap').hide();
                             $('#sale-customer-wrap').hide();
                             $('#sale-method-wrap').hide();
+                            $('#btn-complete-pending').hide();
                             closeModal();
                             refreshPickerOpenButton();
                             renderTable();
