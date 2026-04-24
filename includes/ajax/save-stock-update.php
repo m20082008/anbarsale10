@@ -28,6 +28,38 @@ function wc_suf_validate_sale_method_for_current_user( $raw_method ) {
     return $sale_method;
 }
 
+function wc_suf_update_pending_order_visible_meta( $order, $breakdown_rows ) {
+    if ( ! $order || ! is_a( $order, 'WC_Order' ) ) {
+        return;
+    }
+    $rows = is_array( $breakdown_rows ) ? $breakdown_rows : [];
+    $lines = [];
+    $total_pending = 0;
+
+    foreach ( $rows as $row ) {
+        $pending_qty = max( 0, (int) ( $row['pending_qty'] ?? 0 ) );
+        if ( $pending_qty <= 0 ) {
+            continue;
+        }
+        $pid = absint( $row['product_id'] ?? 0 );
+        $name = trim( (string) ( $row['product_name'] ?? '' ) );
+        if ( $name === '' && $pid > 0 ) {
+            $product = wc_get_product( $pid );
+            if ( $product ) {
+                $name = (string) $product->get_name();
+            }
+        }
+        if ( $name === '' ) {
+            $name = 'محصول #' . $pid;
+        }
+        $total_pending += $pending_qty;
+        $lines[] = sprintf( '%s | تعداد در انتظار: %d', $name, $pending_qty );
+    }
+
+    $order->update_meta_data( 'تعداد کل در انتظار', $total_pending );
+    $order->update_meta_data( 'اقلام در انتظار', empty($lines) ? 'ندارد' : implode( "\n", $lines ) );
+}
+
 function wc_suf_sync_sale_hold_order_handler(){
     check_ajax_referer('wc_suf_sync_sale_hold_order');
 
@@ -745,6 +777,7 @@ function wc_suf_save_stock_update_handler(){
             }
             $sale_order->update_meta_data( '_wc_suf_pending_qty_total', $pending_qty_total );
             $sale_order->update_meta_data( '_wc_suf_pending_qty_map', wp_json_encode( $pending_qty_map, JSON_UNESCAPED_UNICODE ) );
+            wc_suf_update_pending_order_visible_meta( $sale_order, $sale_pending_breakdown );
             $sale_order->calculate_totals();
             if ( $sale_submit_mode === 'pending_review' ) {
                 $sale_order->set_status( 'pendingreview', 'ثبت سفارش در وضعیت در انتظار از فرم فروش.' );
@@ -1014,6 +1047,7 @@ function wc_suf_complete_pending_sale_handler(){
     $order->update_meta_data( '_wc_suf_pending_breakdown', wp_json_encode( $updated_breakdown, JSON_UNESCAPED_UNICODE ) );
     $order->update_meta_data( '_wc_suf_pending_qty_total', $pending_qty_total );
     $order->update_meta_data( '_wc_suf_pending_qty_map', wp_json_encode( $pending_qty_map, JSON_UNESCAPED_UNICODE ) );
+    wc_suf_update_pending_order_visible_meta( $order, $updated_breakdown );
     $order->calculate_totals();
 
     if ( $pending_qty_total <= 0 ) {
