@@ -78,6 +78,8 @@ add_shortcode('stock_update_form', function($atts){
     }
     $allowed_ops = wc_suf_get_allowed_ops_for_current_user();
     $is_marjoo_only = wc_suf_is_marjoo_only_user();
+    $is_sale_user = wc_suf_current_user_has_role( 'sale' );
+    $is_tehsale_user = wc_suf_current_user_has_role( 'tehsale' );
     $atts = shortcode_atts(['key' => ''], $atts, 'stock_update_form');
     $current_user = wp_get_current_user();
     $display_name = trim( (string) $current_user->first_name . ' ' . (string) $current_user->last_name );
@@ -203,6 +205,9 @@ add_shortcode('stock_update_form', function($atts){
       .wc-suf-sale-customer-field input,
       .wc-suf-sale-customer-field textarea{width:100%; padding:8px; border:1px solid #e5e7eb; border-radius:10px}
       .wc-suf-sale-customer-field textarea{min-height:82px; resize:vertical; background:#fff}
+      .wc-suf-sale-method-wrap{display:none; align-items:center; gap:8px; flex-wrap:wrap}
+      .wc-suf-sale-method-wrap label{font-weight:700; min-width:120px}
+      .wc-suf-sale-method-wrap select{padding:8px; border:1px solid #e5e7eb; border-radius:10px; min-width:280px; background:#fff}
       @media (max-width: 768px){
         #optype-block{gap:10px !important; padding:10px !important}
         #optype-block > div:first-child{min-width:unset !important; width:100%}
@@ -308,6 +313,19 @@ add_shortcode('stock_update_form', function($atts){
         </div>
         
         <div id="sale-customer-wrap" class="wc-suf-sale-customer-wrap">
+          <div id="sale-method-wrap" class="wc-suf-sale-method-wrap">
+            <label for="sale-method">نحوه فروش:</label>
+            <select id="sale-method">
+              <option value="">انتخاب نحوه فروش...</option>
+              <?php if ( ! $is_tehsale_user ) : ?>
+              <option value="main_onsite">۱- فروش حضوری انبار اصلی</option>
+              <?php endif; ?>
+              <option value="tehranpars_onsite">۲- فروش حضوری شعبه تهرانپارس</option>
+              <option value="post">۳- پست</option>
+              <option value="snap">۴- اسنپ</option>
+              <option value="tipax">۵- تیپاکس</option>
+            </select>
+          </div>
           <div class="wc-suf-sale-customer-row">
             <div class="wc-suf-sale-customer-field">
               <label for="sale-customer-mobile">شماره موبایل:</label>
@@ -401,6 +419,8 @@ add_shortcode('stock_update_form', function($atts){
         const pickerAttrDefs = <?php echo wp_json_encode($picker_attr_defs); ?>;
         const isMarjooOnly = <?php echo $is_marjoo_only ? 'true' : 'false'; ?>;
         const allowedOps = <?php echo wp_json_encode( $allowed_ops ); ?>;
+        const isSaleUserRole = <?php echo $is_sale_user ? 'true' : 'false'; ?>;
+        const isTehSaleUserRole = <?php echo $is_tehsale_user ? 'true' : 'false'; ?>;
 
         const defaultShortcodeKey = "<?php echo esc_js($atts['key']); ?>";
         const urlParams = new URLSearchParams(window.location.search);
@@ -417,6 +437,7 @@ add_shortcode('stock_update_form', function($atts){
         let saleCustomerName = '';
         let saleCustomerMobile = '';
         let saleCustomerAddress = '';
+        let saleMethod = '';
         let saleHoldOrderId = 0;
 
         const $overlay = $('#wc-suf-modal-overlay');
@@ -554,6 +575,7 @@ add_shortcode('stock_update_form', function($atts){
                         sale_customer_name : String(saleCustomerName || ''),
                         sale_customer_mobile : String(saleCustomerMobile || ''),
                         sale_customer_address : String(saleCustomerAddress || ''),
+                        sale_method : String(saleMethod || ''),
                         _wpnonce : '<?php echo wp_create_nonce('wc_suf_sync_sale_hold_order'); ?>'
                     });
                 }
@@ -567,6 +589,7 @@ add_shortcode('stock_update_form', function($atts){
                 sale_customer_name : String(saleCustomerName || ''),
                 sale_customer_mobile : String(saleCustomerMobile || ''),
                 sale_customer_address : String(saleCustomerAddress || ''),
+                sale_method : String(saleMethod || ''),
                 _wpnonce : '<?php echo wp_create_nonce('wc_suf_sync_sale_hold_order'); ?>'
             }).done(function(res){
                 if(res && res.success && res.data && res.data.order_id){
@@ -635,6 +658,10 @@ add_shortcode('stock_update_form', function($atts){
             const name = String(saleCustomerName || '').trim();
             const mobile = normalizeMobileInput(saleCustomerMobile);
             const address = String(saleCustomerAddress || '').trim();
+            if(!saleMethod){
+                if(showAlert) alert('نحوه فروش را انتخاب کنید.');
+                return false;
+            }
             if(name.length < 3){
                 if(showAlert) alert('نام و نام خانوادگی را کامل وارد کنید.');
                 return false;
@@ -1287,11 +1314,13 @@ add_shortcode('stock_update_form', function($atts){
                 $('#transfer-controls-wrap').hide();
                 $('#return-controls-wrap').hide();
                 $('#sale-customer-wrap').css('display','flex');
+                $('#sale-method-wrap').css('display','flex');
             } else {
                 $('#out-destination-wrap').hide();
                 $('#transfer-controls-wrap').hide();
                 $('#return-controls-wrap').hide();
                 $('#sale-customer-wrap').hide();
+                $('#sale-method-wrap').hide();
             }
 
             refreshPickerOpenButton();
@@ -1385,6 +1414,14 @@ add_shortcode('stock_update_form', function($atts){
 
         syncOpTypeButtonsState();
 
+        if(isTehSaleUserRole){
+            $('#sale-method option[value="main_onsite"]').remove();
+        }
+        if(isSaleUserRole){
+            saleMethod = 'post';
+            $('#sale-method').val('post');
+        }
+
         $('#return-reason').on('change', function(){
             if(opType !== 'return') return;
             returnReason = $(this).val() || '';
@@ -1435,6 +1472,12 @@ add_shortcode('stock_update_form', function($atts){
         });
         $('#sale-customer-address').on('input', function(){
             saleCustomerAddress = $(this).val() || '';
+            refreshPickerOpenButton();
+            $('#btn-save').prop('disabled', !canSave());
+            syncSaleHoldOrder(false);
+        });
+        $('#sale-method').on('change', function(){
+            saleMethod = $(this).val() || '';
             refreshPickerOpenButton();
             $('#btn-save').prop('disabled', !canSave());
             syncSaleHoldOrder(false);
@@ -1505,6 +1548,7 @@ add_shortcode('stock_update_form', function($atts){
                 sale_customer_name : String(saleCustomerName || ''),
                 sale_customer_mobile : String(saleCustomerMobile || ''),
                 sale_customer_address : String(saleCustomerAddress || ''),
+                sale_method : String(saleMethod || ''),
                 sale_hold_order_id : saleHoldOrderId,
                 op_type     : opType,
                 _wpnonce    : '<?php echo wp_create_nonce('save_stock_update'); ?>'
@@ -1527,6 +1571,7 @@ add_shortcode('stock_update_form', function($atts){
                             saleCustomerName = '';
                             saleCustomerMobile = '';
                             saleCustomerAddress = '';
+                            saleMethod = '';
                             saleHoldOrderId = 0;
                             for (const pid in pickerQty){
                                 if (Object.prototype.hasOwnProperty.call(pickerQty, pid)) pickerQty[pid] = 0;
@@ -1541,10 +1586,13 @@ add_shortcode('stock_update_form', function($atts){
                             $('#sale-customer-name').val('');
                             $('#sale-customer-mobile').val('');
                             $('#sale-customer-address').val('');
+                            $('#sale-method').val(isSaleUserRole ? 'post' : '');
+                            saleMethod = $('#sale-method').val() || '';
                             $('#out-destination-wrap').hide();
                             $('#transfer-controls-wrap').hide();
                             $('#return-controls-wrap').hide();
                             $('#sale-customer-wrap').hide();
+                            $('#sale-method-wrap').hide();
                             closeModal();
                             refreshPickerOpenButton();
                             renderTable();
