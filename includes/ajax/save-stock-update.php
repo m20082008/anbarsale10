@@ -215,6 +215,8 @@ function wc_suf_save_stock_update_handler(){
     $sale_method_raw = isset($_POST['sale_method']) ? wp_unslash($_POST['sale_method']) : '';
     $sale_method = '';
     $sale_hold_order_id = isset($_POST['sale_hold_order_id']) ? absint($_POST['sale_hold_order_id']) : 0;
+    $sale_submit_mode_in = isset($_POST['sale_submit_mode']) ? sanitize_text_field( wp_unslash($_POST['sale_submit_mode']) ) : 'final';
+    $sale_submit_mode = in_array( $sale_submit_mode_in, ['final','pending_review'], true ) ? $sale_submit_mode_in : 'final';
     $transfer_store_id = null;
     if ( $op_type === 'out' ) {
         if ( ! in_array( $out_destination, ['main','teh'], true ) ) {
@@ -331,6 +333,9 @@ function wc_suf_save_stock_update_handler(){
             $locked_old_qty[$pid] = $old;
 
             if( $req > $old ){
+                if ( in_array( $op_type, ['sale','sale_teh'], true ) && $sale_submit_mode === 'pending_review' ) {
+                    continue;
+                }
                 $insufficient[] = [
                     'id'   => $pid,
                     'name' => $pname,
@@ -370,6 +375,7 @@ function wc_suf_save_stock_update_handler(){
     $processed_items = 0;
     $csv_rows = [];
     $sale_order = null;
+    $sale_pending_breakdown = [];
 
     foreach($items as $it){
         $pid = isset($it['id'])  ? absint($it['id']) : 0;
@@ -511,8 +517,17 @@ function wc_suf_save_stock_update_handler(){
             $logged_added = $req;
         } elseif ( $op_type === 'sale' || $op_type === 'sale_teh' ) {
             $old_qty = (int) ( $stock_product->get_stock_quantity() ?? 0 );
-            $new_qty = max( 0, (int) $old_qty - $req );
-            $logged_added = $req;
+            $allocated_qty = min( $req, max( 0, $old_qty ) );
+            $pending_qty = max( 0, $req - $allocated_qty );
+            $sale_pending_breakdown[] = [
+                'product_id' => $pid,
+                'product_name' => $pname,
+                'requested_qty' => $req,
+                'allocated_qty' => $allocated_qty,
+                'pending_qty' => $pending_qty,
+            ];
+            $new_qty = max( 0, (int) $old_qty - $allocated_qty );
+            $logged_added = $allocated_qty;
 
         } elseif( $op_type === 'return' ){
             $logged_added = $req;
@@ -633,7 +648,7 @@ function wc_suf_save_stock_update_handler(){
                     [
                         'destination'         => ( $op_type === 'out' ) ? $out_destination : ( $op_type === 'return' ? $return_destination : ( ( $op_type === 'sale' || $op_type === 'sale_teh' ) ? 'main' : ( $op_type === 'onlyLabel' ? 'label_only' : 'production' ) ) ),
                         'old_qty'             => (float) $old_qty,
-                        'change_qty'          => (float) $req,
+                        'change_qty'          => (float) $logged_added,
                         'new_qty'             => (float) $new_qty,
                         'destination_old_qty' => ( $destination_old_qty === null ? null : (float) $destination_old_qty ),
                         'destination_new_qty' => ( $destination_new_qty === null ? null : (float) $destination_new_qty ),
@@ -711,8 +726,14 @@ function wc_suf_save_stock_update_handler(){
             $sale_order->update_meta_data( 'sale_method', $sale_method );
             $sale_order->update_meta_data( 'sale_method_label', wc_suf_get_sale_method_labels()[ $sale_method ] );
             $sale_order->update_meta_data( 'نحوه فروش', wc_suf_get_sale_method_labels()[ $sale_method ] );
+            $sale_order->update_meta_data( '_wc_suf_sale_submit_mode', $sale_submit_mode );
+            $sale_order->update_meta_data( '_wc_suf_pending_breakdown', wp_json_encode( $sale_pending_breakdown, JSON_UNESCAPED_UNICODE ) );
             $sale_order->calculate_totals();
-            $sale_order->set_status( 'processing', 'ثبت سفارش از فرم عملیات فروش انبار تولید.' );
+            if ( $sale_submit_mode === 'pending_review' ) {
+                $sale_order->set_status( 'pendingreview', 'ثبت سفارش در وضعیت در انتظار بررسی از فرم فروش.' );
+            } else {
+                $sale_order->set_status( 'processing', 'ثبت سفارش از فرم عملیات فروش انبار تولید.' );
+            }
             $sale_order->save();
             if ( $sale_hold_order_id <= 0 ) {
                 wc_reduce_stock_levels( $sale_order->get_id() );
@@ -841,6 +862,9 @@ function wc_suf_save_stock_update_handler(){
     $product_ids = array_values( array_unique( $product_ids ) );
 
     $message = "ثبت {$op_label} انجام شد.";
+    if ( $is_sale_operation && $sale_submit_mode === 'pending_review' ) {
+        $message = 'سفارش با وضعیت «در انتظار بررسی» ثبت شد.';
+    }
     if ( ! $is_sale_operation ) {
         $message .= " کد ثبت: {$batch_code}";
     }
