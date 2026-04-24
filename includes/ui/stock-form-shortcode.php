@@ -492,7 +492,8 @@ add_shortcode('stock_update_form', function($atts){
         function recomputeSaleSplitForItem(it){
             if(!it) return;
             const requested = Math.max(0, parseInt(it.qty, 10) || 0);
-            const sourceStock = Math.max(0, findMainStockById(it.id));
+            const sourceStockRaw = Number.isFinite(+it.sale_base_stock) ? (+it.sale_base_stock) : findMainStockById(it.id);
+            const sourceStock = Math.max(0, sourceStockRaw || 0);
             it.sale_allocated_qty = Math.min(requested, sourceStock);
             it.sale_pending_qty = Math.max(0, requested - it.sale_allocated_qty);
         }
@@ -518,13 +519,6 @@ add_shortcode('stock_update_form', function($atts){
                 });
             });
             return payload;
-        }
-        function adjustMainStockInMemory(id, delta){
-            const product = findById(id);
-            if(!product) return;
-            const current = +product.wc_stock || 0;
-            const next = current + (+delta || 0);
-            product.wc_stock = Math.max(0, Math.floor(next));
         }
         function warehouseLabel(code){
             if(code === 'main') return 'انبار اصلی';
@@ -848,9 +842,9 @@ add_shortcode('stock_update_form', function($atts){
                     const returnStock = (returnDestination === 'main') ? (+p.wc_stock || 0) : (+p.teh_stock || 0);
                     tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(returnStock)}</td>`);
                 } else if (isSaleOperation){
-                    const p = findById(it.id);
-                    const mainStock = +((p && p.wc_stock) || 0);
-                    tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(mainStock)}</td>`);
+                    const baseMainStock = Math.max(0, Number.isFinite(+it.sale_base_stock) ? (+it.sale_base_stock) : findMainStockById(it.id));
+                    const remainingMainStock = Math.max(0, baseMainStock - (parseInt(it.qty, 10) || 0));
+                    tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(remainingMainStock)}</td>`);
                 }
                 if (isSaleOperation){
                     recomputeSaleSplitForItem(it);
@@ -1263,11 +1257,22 @@ add_shortcode('stock_update_form', function($atts){
                     if (existingIdx >= 0){
                         items[existingIdx].qty = (items[existingIdx].qty || 0) + qty;
                         items[existingIdx].stock = stock;
+                        if (!Number.isFinite(+items[existingIdx].sale_base_stock)) {
+                            items[existingIdx].sale_base_stock = findMainStockById(pid);
+                        }
                         enforceOutLimit(existingIdx);
                         enforceTransferLimit(existingIdx);
                         enforceSaleLimit(existingIdx);
                     } else {
-                        items.push({id: pid, name, qty, stock, sale_allocated_qty: 0, sale_pending_qty: 0});
+                        items.push({
+                            id: pid,
+                            name,
+                            qty,
+                            stock,
+                            sale_base_stock: findMainStockById(pid),
+                            sale_allocated_qty: 0,
+                            sale_pending_qty: 0
+                        });
                         enforceOutLimit(items.length - 1);
                         enforceTransferLimit(items.length - 1);
                         enforceSaleLimit(items.length - 1);
@@ -1540,9 +1545,6 @@ add_shortcode('stock_update_form', function($atts){
         $('#items-table').on('click','.btn-del',function(){
             const i = +$(this).data('i');
             const removed = items[i];
-            if((opType === 'sale' || opType === 'sale_teh') && removed && removed.id){
-                adjustMainStockInMemory(removed.id, +removed.qty || 0);
-            }
             items.splice(i,1);
             renderTable();
             syncSaleHoldOrder(true);
