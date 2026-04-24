@@ -134,17 +134,23 @@ function wc_suf_sync_sale_hold_order_handler(){
         $existing_items[ $pid ] = ['item_id' => $item_id, 'item' => $item];
     }
 
+    $sync_warnings = [];
     foreach ( $existing_items as $pid => $entry ) {
         $old_qty = max(0, (int) $entry['item']->get_quantity());
-        $new_qty = max(0, (int) ($desired[ $pid ] ?? 0));
+        $target_qty = max(0, (int) ($desired[ $pid ] ?? 0));
+        $new_qty = $target_qty;
         $delta = $new_qty - $old_qty;
         if ( $delta > 0 ) {
             $product = wc_get_product( $pid );
             $have = (int) ( $product ? $product->get_stock_quantity() : 0 );
-            if ( $delta > $have ) {
-                wp_send_json_error(['message'=>sprintf('موجودی محصول #%d کافی نیست.', $pid)]);
+            $alloc_delta = min( $delta, max( 0, $have ) );
+            $new_qty = $old_qty + $alloc_delta;
+            if ( $alloc_delta > 0 ) {
+                wc_update_product_stock( $product, $alloc_delta, 'decrease' );
             }
-            wc_update_product_stock( $product, $delta, 'decrease' );
+            if ( $alloc_delta < $delta ) {
+                $sync_warnings[] = sprintf('موجودی محصول #%d محدود بود و بخشی از مقدار به‌صورت در انتظار باقی ماند.', $pid);
+            }
         } elseif ( $delta < 0 ) {
             $product = wc_get_product( $pid );
             wc_update_product_stock( $product, abs($delta), 'increase' );
@@ -163,11 +169,14 @@ function wc_suf_sync_sale_hold_order_handler(){
         $product = wc_get_product( $pid );
         if ( ! $product || $qty <= 0 ) continue;
         $have = (int) ( $product->get_stock_quantity() ?? 0 );
-        if ( $qty > $have ) {
-            wp_send_json_error(['message'=>sprintf('موجودی محصول #%d کافی نیست.', $pid)]);
+        $alloc_qty = min( $qty, max(0, $have) );
+        if ( $alloc_qty > 0 ) {
+            $order->add_product( $product, $alloc_qty );
+            wc_update_product_stock( $product, $alloc_qty, 'decrease' );
         }
-        $order->add_product( $product, $qty );
-        wc_update_product_stock( $product, $qty, 'decrease' );
+        if ( $alloc_qty < $qty ) {
+            $sync_warnings[] = sprintf('موجودی محصول #%d محدود بود و بخشی از مقدار به‌صورت در انتظار باقی ماند.', $pid);
+        }
     }
 
     $order->set_address([
@@ -207,6 +216,7 @@ function wc_suf_sync_sale_hold_order_handler(){
     wp_send_json_success([
         'order_id' => (int) $order->get_id(),
         'order_number' => (string) $order->get_order_number(),
+        'warnings' => $sync_warnings,
     ]);
 }
 
