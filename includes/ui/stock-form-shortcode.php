@@ -1721,7 +1721,14 @@ add_shortcode('wc_suf_my_sale_orders', function(){
 
     ob_start();
     echo '<div dir="rtl" style="display:grid; gap:12px">';
+    $pending_report_url = wp_nonce_url(
+        admin_url( 'admin-ajax.php?action=wc_suf_pending_products_report' ),
+        'wc_suf_pending_products_report'
+    );
+    echo '<div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap">';
     echo '<h3 style="margin:0">سفارش‌های ثبت‌شده توسط من</h3>';
+    echo '<a href="' . esc_url( $pending_report_url ) . '" target="_blank" rel="noopener" style="display:inline-flex; align-items:center; padding:8px 12px; border:1px solid #1d4ed8; background:#1d4ed8; color:#fff; border-radius:8px; text-decoration:none; font-weight:700">گزارش کل محصولات در انتظار</a>';
+    echo '</div>';
     if ( empty($orders) ) {
         echo '<div style="padding:10px 12px; border:1px solid #e5e7eb; border-radius:10px; background:#f9fafb">هنوز سفارشی ثبت نکرده‌اید.</div>';
         echo '</div>';
