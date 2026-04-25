@@ -62,6 +62,145 @@ function wc_suf_update_pending_order_visible_meta( $order, $breakdown_rows ) {
     $order->update_meta_data( 'اقلام در انتظار', empty($lines) ? 'ندارد' : implode( "\n", $lines ) );
 }
 
+function wc_suf_get_sale_pending_table_name() {
+    global $wpdb;
+    return $wpdb->prefix . 'wc_suf_sale_pending_items';
+}
+
+function wc_suf_normalize_pending_breakdown_rows( $breakdown_rows ) {
+    $rows = [];
+    foreach ( (array) $breakdown_rows as $row ) {
+        $pid = absint( $row['product_id'] ?? 0 );
+        if ( $pid <= 0 ) {
+            continue;
+        }
+        $requested = max( 0, (int) ( $row['requested_qty'] ?? 0 ) );
+        $allocated = max( 0, (int) ( $row['allocated_qty'] ?? 0 ) );
+        $pending = max( 0, (int) ( $row['pending_qty'] ?? 0 ) );
+        if ( $requested <= 0 && $allocated <= 0 && $pending <= 0 ) {
+            continue;
+        }
+        $rows[] = [
+            'product_id'    => $pid,
+            'product_name'  => (string) ( $row['product_name'] ?? '' ),
+            'requested_qty' => $requested,
+            'allocated_qty' => $allocated,
+            'pending_qty'   => $pending,
+        ];
+    }
+    return $rows;
+}
+
+function wc_suf_replace_pending_items_for_order( $order_id, $breakdown_rows ) {
+    global $wpdb;
+    $order_id = absint( $order_id );
+    if ( $order_id <= 0 ) {
+        return;
+    }
+
+    $table = wc_suf_get_sale_pending_table_name();
+    $rows = wc_suf_normalize_pending_breakdown_rows( $breakdown_rows );
+    $wpdb->delete( $table, [ 'order_id' => $order_id ], [ '%d' ] );
+
+    if ( empty( $rows ) ) {
+        return;
+    }
+
+    $updated_at = current_time( 'mysql' );
+    foreach ( $rows as $row ) {
+        $wpdb->query(
+            $wpdb->prepare(
+                "INSERT INTO `$table` (`order_id`, `product_id`, `requested_qty`, `allocated_qty`, `pending_qty`, `updated_at`)
+                 VALUES (%d, %d, %d, %d, %d, %s)
+                 ON DUPLICATE KEY UPDATE
+                    `requested_qty` = VALUES(`requested_qty`),
+                    `allocated_qty` = VALUES(`allocated_qty`),
+                    `pending_qty` = VALUES(`pending_qty`),
+                    `updated_at` = VALUES(`updated_at`)",
+                $order_id,
+                (int) $row['product_id'],
+                (int) $row['requested_qty'],
+                (int) $row['allocated_qty'],
+                (int) $row['pending_qty'],
+                $updated_at
+            )
+        );
+    }
+}
+
+function wc_suf_get_pending_items_from_table( $order_id ) {
+    global $wpdb;
+    $order_id = absint( $order_id );
+    if ( $order_id <= 0 ) {
+        return [];
+    }
+
+    $table = wc_suf_get_sale_pending_table_name();
+    $rows = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT product_id, requested_qty, allocated_qty, pending_qty
+             FROM `$table`
+             WHERE order_id = %d",
+            $order_id
+        ),
+        ARRAY_A
+    );
+    if ( ! is_array( $rows ) ) {
+        return [];
+    }
+    $normalized = [];
+    foreach ( $rows as $row ) {
+        $pid = absint( $row['product_id'] ?? 0 );
+        if ( $pid <= 0 ) {
+            continue;
+        }
+        $normalized[] = [
+            'product_id'    => $pid,
+            'requested_qty' => max( 0, (int) ( $row['requested_qty'] ?? 0 ) ),
+            'allocated_qty' => max( 0, (int) ( $row['allocated_qty'] ?? 0 ) ),
+            'pending_qty'   => max( 0, (int) ( $row['pending_qty'] ?? 0 ) ),
+        ];
+    }
+    return $normalized;
+}
+
+function wc_suf_get_pending_breakdown_from_meta( $order ) {
+    if ( ! $order || ! is_a( $order, 'WC_Order' ) ) {
+        return [];
+    }
+    $pending_meta = (string) $order->get_meta('_wc_suf_pending_breakdown', true );
+    $pending_rows = json_decode( $pending_meta, true );
+    if ( ! is_array( $pending_rows ) ) {
+        return [];
+    }
+    return wc_suf_normalize_pending_breakdown_rows( $pending_rows );
+}
+
+function wc_suf_sync_pending_snapshot_meta( $order, $breakdown_rows ) {
+    if ( ! $order || ! is_a( $order, 'WC_Order' ) ) {
+        return;
+    }
+    $rows = wc_suf_normalize_pending_breakdown_rows( $breakdown_rows );
+    $pending_qty_total = 0;
+    $pending_qty_map = [];
+    foreach ( $rows as $row ) {
+        $pending_qty = max( 0, (int) ( $row['pending_qty'] ?? 0 ) );
+        if ( $pending_qty <= 0 ) {
+            continue;
+        }
+        $pid = absint( $row['product_id'] ?? 0 );
+        if ( $pid <= 0 ) {
+            continue;
+        }
+        $pending_qty_total += $pending_qty;
+        $pending_qty_map[ $pid ] = $pending_qty;
+    }
+    $order->update_meta_data( '_wc_suf_pending_breakdown', wp_json_encode( $rows, JSON_UNESCAPED_UNICODE ) );
+    $order->update_meta_data( '_wc_suf_pending_qty_total', $pending_qty_total );
+    $order->update_meta_data( '_wc_suf_pending_qty_map', wp_json_encode( $pending_qty_map, JSON_UNESCAPED_UNICODE ) );
+    wc_suf_update_pending_order_visible_meta( $order, $rows );
+}
+
 function wc_suf_log_pending_sale_allocation( $order, $product, $allocated_qty, $old_qty, $new_qty, $requested_qty, $pending_after_qty ) {
     if ( ! $order || ! is_a( $order, 'WC_Order' ) || ! $product || ! is_a( $product, 'WC_Product' ) ) {
         return;
@@ -209,14 +348,14 @@ function wc_suf_get_sale_order_for_edit_handler(){
     }
 
     $pending_map = [];
-    $pending_meta = (string) $order->get_meta('_wc_suf_pending_breakdown', true );
-    $pending_rows = json_decode( $pending_meta, true );
-    if ( is_array($pending_rows) ) {
-        foreach ( $pending_rows as $row ) {
-            $pid = absint( $row['product_id'] ?? 0 );
-            if ( $pid <= 0 ) continue;
-            $pending_map[ $pid ] = max( 0, (int) ( $row['pending_qty'] ?? 0 ) );
-        }
+    $pending_rows = wc_suf_get_pending_items_from_table( $order->get_id() );
+    if ( empty( $pending_rows ) ) {
+        $pending_rows = wc_suf_get_pending_breakdown_from_meta( $order );
+    }
+    foreach ( $pending_rows as $row ) {
+        $pid = absint( $row['product_id'] ?? 0 );
+        if ( $pid <= 0 ) continue;
+        $pending_map[ $pid ] = max( 0, (int) ( $row['pending_qty'] ?? 0 ) );
     }
 
     $items = [];
@@ -482,6 +621,7 @@ function wc_suf_sync_sale_hold_order_handler(){
         if ( $pid <= 0 || $qty <= 0 ) continue;
         $desired[ $pid ] = ( $desired[ $pid ] ?? 0 ) + $qty;
     }
+    $requested_map = $desired;
 
     $user = wp_get_current_user();
     $uid  = (int) ($user->ID ?? 0);
@@ -519,6 +659,7 @@ function wc_suf_sync_sale_hold_order_handler(){
     }
 
     $sync_warnings = [];
+    $allocated_map = [];
     foreach ( $existing_items as $pid => $entry ) {
         $old_qty = max(0, (int) $entry['item']->get_quantity());
         $target_qty = max(0, (int) ($desired[ $pid ] ?? 0));
@@ -546,6 +687,7 @@ function wc_suf_sync_sale_hold_order_handler(){
             $entry['item']->set_quantity( $new_qty );
             $order->add_item( $entry['item'] );
         }
+        $allocated_map[ $pid ] = max( 0, (int) $new_qty );
         unset($desired[ $pid ]);
     }
 
@@ -558,9 +700,33 @@ function wc_suf_sync_sale_hold_order_handler(){
             $order->add_product( $product, $alloc_qty );
             wc_update_product_stock( $product, $alloc_qty, 'decrease' );
         }
+        $allocated_map[ $pid ] = max( 0, (int) $alloc_qty );
         if ( $alloc_qty < $qty ) {
             $sync_warnings[] = sprintf('موجودی محصول #%d محدود بود و بخشی از مقدار به‌صورت در انتظار باقی ماند.', $pid);
         }
+    }
+
+    $pending_breakdown = [];
+    $all_pending_ids = array_unique( array_merge( array_keys( $requested_map ), array_keys( $allocated_map ) ) );
+    foreach ( $all_pending_ids as $pid ) {
+        $pid = absint( $pid );
+        if ( $pid <= 0 ) {
+            continue;
+        }
+        $requested_qty = max( 0, (int) ( $requested_map[ $pid ] ?? 0 ) );
+        $allocated_qty = max( 0, (int) ( $allocated_map[ $pid ] ?? 0 ) );
+        $pending_qty = max( 0, $requested_qty - $allocated_qty );
+        if ( $requested_qty <= 0 && $allocated_qty <= 0 && $pending_qty <= 0 ) {
+            continue;
+        }
+        $product = wc_get_product( $pid );
+        $pending_breakdown[] = [
+            'product_id'    => $pid,
+            'product_name'  => $product ? wc_suf_full_product_label( $product ) : ( 'محصول #' . $pid ),
+            'requested_qty' => $requested_qty,
+            'allocated_qty' => $allocated_qty,
+            'pending_qty'   => $pending_qty,
+        ];
     }
 
     $order->set_address([
@@ -586,6 +752,8 @@ function wc_suf_sync_sale_hold_order_handler(){
     $order->update_meta_data( 'sale_method', $sale_method );
     $order->update_meta_data( 'sale_method_label', wc_suf_get_sale_method_labels()[ $sale_method ] );
     $order->update_meta_data( 'نحوه فروش', wc_suf_get_sale_method_labels()[ $sale_method ] );
+    wc_suf_replace_pending_items_for_order( $order->get_id(), $pending_breakdown );
+    wc_suf_sync_pending_snapshot_meta( $order, $pending_breakdown );
     $order->calculate_totals();
     $order->save();
 
@@ -1160,24 +1328,8 @@ function wc_suf_save_stock_update_handler(){
                 throw new Exception( $sale_pending_breakdown->get_error_message() );
             }
 
-            $sale_order->update_meta_data( '_wc_suf_pending_breakdown', wp_json_encode( $sale_pending_breakdown, JSON_UNESCAPED_UNICODE ) );
-            $pending_qty_total = 0;
-            $pending_qty_map = [];
-            foreach ( $sale_pending_breakdown as $pending_row ) {
-                $pending_qty = max( 0, (int) ( $pending_row['pending_qty'] ?? 0 ) );
-                if ( $pending_qty <= 0 ) {
-                    continue;
-                }
-                $pending_pid = absint( $pending_row['product_id'] ?? 0 );
-                if ( $pending_pid <= 0 ) {
-                    continue;
-                }
-                $pending_qty_total += $pending_qty;
-                $pending_qty_map[ $pending_pid ] = $pending_qty;
-            }
-            $sale_order->update_meta_data( '_wc_suf_pending_qty_total', $pending_qty_total );
-            $sale_order->update_meta_data( '_wc_suf_pending_qty_map', wp_json_encode( $pending_qty_map, JSON_UNESCAPED_UNICODE ) );
-            wc_suf_update_pending_order_visible_meta( $sale_order, $sale_pending_breakdown );
+            wc_suf_replace_pending_items_for_order( $sale_order->get_id(), $sale_pending_breakdown );
+            wc_suf_sync_pending_snapshot_meta( $sale_order, $sale_pending_breakdown );
             $sale_order->calculate_totals();
             if ( $sale_submit_mode === 'pending_review' ) {
                 $sale_order->set_status( 'pendingreview', 'ثبت سفارش در وضعیت در انتظار از فرم فروش.' );
@@ -1356,8 +1508,10 @@ function wc_suf_complete_pending_sale_handler(){
         wp_send_json_error(['message' => 'شما دسترسی تکمیل این سفارش را ندارید.']);
     }
 
-    $pending_raw = (string) $order->get_meta('_wc_suf_pending_breakdown', true);
-    $pending_rows = json_decode( $pending_raw, true );
+    $pending_rows = wc_suf_get_pending_items_from_table( $order->get_id() );
+    if ( empty( $pending_rows ) ) {
+        $pending_rows = wc_suf_get_pending_breakdown_from_meta( $order );
+    }
     if ( ! is_array($pending_rows) || empty($pending_rows) ) {
         wp_send_json_error(['message' => 'محصول در انتظاری برای این سفارش ثبت نشده است.']);
     }
@@ -1445,20 +1599,11 @@ function wc_suf_complete_pending_sale_handler(){
     }
 
     $pending_qty_total = 0;
-    $pending_qty_map = [];
     foreach ( $updated_breakdown as $row ) {
-        $pid = absint( $row['product_id'] ?? 0 );
-        $pqty = max(0, (int) ( $row['pending_qty'] ?? 0 ));
-        if ( $pid > 0 && $pqty > 0 ) {
-            $pending_qty_total += $pqty;
-            $pending_qty_map[ $pid ] = $pqty;
-        }
+        $pending_qty_total += max( 0, (int) ( $row['pending_qty'] ?? 0 ) );
     }
-
-    $order->update_meta_data( '_wc_suf_pending_breakdown', wp_json_encode( $updated_breakdown, JSON_UNESCAPED_UNICODE ) );
-    $order->update_meta_data( '_wc_suf_pending_qty_total', $pending_qty_total );
-    $order->update_meta_data( '_wc_suf_pending_qty_map', wp_json_encode( $pending_qty_map, JSON_UNESCAPED_UNICODE ) );
-    wc_suf_update_pending_order_visible_meta( $order, $updated_breakdown );
+    wc_suf_replace_pending_items_for_order( $order->get_id(), $updated_breakdown );
+    wc_suf_sync_pending_snapshot_meta( $order, $updated_breakdown );
     $order->calculate_totals();
 
     if ( $pending_qty_total <= 0 ) {
