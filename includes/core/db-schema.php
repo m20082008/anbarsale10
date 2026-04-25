@@ -95,12 +95,13 @@ register_activation_hook(WC_SUF_PLUGIN_FILE, function(){
       `allocated_qty` INT UNSIGNED NOT NULL DEFAULT 0,
       `pending_qty` INT UNSIGNED NOT NULL DEFAULT 0,
       `updated_at` DATETIME NOT NULL,
-      UNIQUE KEY `order_product` (`order_id`, `product_id`),
+      KEY `order_product` (`order_id`, `product_id`),
       KEY `order_id` (`order_id`),
       KEY `product_id` (`product_id`),
       KEY `updated_at` (`updated_at`)
     ) $charset;";
     dbDelta($sql_pending);
+    wc_suf_ensure_sale_pending_unique_index();
     add_option('wc_suf_db_version', '2.6.0');
 
     if ( get_option('wc_suf_counter_in', null) === null )        add_option('wc_suf_counter_in',  '0', '', false);
@@ -182,11 +183,12 @@ function wc_suf_maybe_upgrade_schema(){
       `allocated_qty` INT UNSIGNED NOT NULL DEFAULT 0,
       `pending_qty` INT UNSIGNED NOT NULL DEFAULT 0,
       `updated_at` DATETIME NOT NULL,
-      UNIQUE KEY `order_product` (`order_id`, `product_id`),
+      KEY `order_product` (`order_id`, `product_id`),
       KEY `order_id` (`order_id`),
       KEY `product_id` (`product_id`),
       KEY `updated_at` (`updated_at`)
     ) $charset;");
+    wc_suf_ensure_sale_pending_unique_index();
 
     if ( ! $exists ) return;
 
@@ -326,4 +328,52 @@ function wc_suf_migrate_pending_breakdown_meta_once() {
     update_option( 'wc_suf_pending_items_migration_v1_done', '1', false );
     update_option( 'wc_suf_pending_items_migration_v1_count', (string) (int) $migrated_count, false );
     error_log( '[wc_suf] pending items migration completed. Migrated rows: ' . (int) $migrated_count );
+}
+
+function wc_suf_ensure_sale_pending_unique_index() {
+    global $wpdb;
+    $table = $wpdb->prefix . 'wc_suf_sale_pending_items';
+    $table_exists = $wpdb->get_var( $wpdb->prepare(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
+        $table
+    ) );
+    if ( ! $table_exists ) {
+        return;
+    }
+
+    $has_unique = $wpdb->get_var(
+        "SHOW INDEX FROM `$table` WHERE Key_name = 'order_product' AND Non_unique = 0"
+    );
+    if ( $has_unique ) {
+        return;
+    }
+
+    $total_rows = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `$table`" );
+    $unique_rows = (int) $wpdb->get_var( "SELECT COUNT(*) FROM (SELECT 1 FROM `$table` GROUP BY order_id, product_id) t" );
+    if ( $total_rows > $unique_rows ) {
+        $tmp_table = $table . '_dedupe_tmp';
+        $wpdb->query( "DROP TEMPORARY TABLE IF EXISTS `$tmp_table`" );
+        $wpdb->query(
+            "CREATE TEMPORARY TABLE `$tmp_table` AS
+             SELECT
+                order_id,
+                product_id,
+                MAX(requested_qty) AS requested_qty,
+                MAX(allocated_qty) AS allocated_qty,
+                MAX(pending_qty) AS pending_qty,
+                MAX(updated_at) AS updated_at
+             FROM `$table`
+             GROUP BY order_id, product_id"
+        );
+        $wpdb->query( "TRUNCATE TABLE `$table`" );
+        $wpdb->query(
+            "INSERT INTO `$table` (`order_id`, `product_id`, `requested_qty`, `allocated_qty`, `pending_qty`, `updated_at`)
+             SELECT order_id, product_id, requested_qty, allocated_qty, pending_qty, updated_at
+             FROM `$tmp_table`"
+        );
+        $wpdb->query( "DROP TEMPORARY TABLE IF EXISTS `$tmp_table`" );
+    }
+
+    $wpdb->query( "ALTER TABLE `$table` DROP INDEX `order_product`" );
+    $wpdb->query( "ALTER TABLE `$table` ADD UNIQUE KEY `order_product` (`order_id`, `product_id`)" );
 }
