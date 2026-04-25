@@ -95,7 +95,6 @@ register_activation_hook(WC_SUF_PLUGIN_FILE, function(){
       `allocated_qty` INT UNSIGNED NOT NULL DEFAULT 0,
       `pending_qty` INT UNSIGNED NOT NULL DEFAULT 0,
       `updated_at` DATETIME NOT NULL,
-      KEY `order_product` (`order_id`, `product_id`),
       KEY `order_id` (`order_id`),
       KEY `product_id` (`product_id`),
       KEY `updated_at` (`updated_at`)
@@ -183,7 +182,6 @@ function wc_suf_maybe_upgrade_schema(){
       `allocated_qty` INT UNSIGNED NOT NULL DEFAULT 0,
       `pending_qty` INT UNSIGNED NOT NULL DEFAULT 0,
       `updated_at` DATETIME NOT NULL,
-      KEY `order_product` (`order_id`, `product_id`),
       KEY `order_id` (`order_id`),
       KEY `product_id` (`product_id`),
       KEY `updated_at` (`updated_at`)
@@ -374,6 +372,11 @@ function wc_suf_ensure_sale_pending_unique_index() {
         $wpdb->query( "DROP TEMPORARY TABLE IF EXISTS `$tmp_table`" );
     }
 
-    $wpdb->query( "ALTER TABLE `$table` DROP INDEX `order_product`" );
+    $has_plain_index = $wpdb->get_var(
+        "SHOW INDEX FROM `$table` WHERE Key_name = 'order_product'"
+    );
+    if ( $has_plain_index ) {
+        $wpdb->query( "ALTER TABLE `$table` DROP INDEX `order_product`" );
+    }
     $wpdb->query( "ALTER TABLE `$table` ADD UNIQUE KEY `order_product` (`order_id`, `product_id`)" );
 }
