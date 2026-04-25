@@ -585,20 +585,34 @@ add_shortcode('stock_update_form', function($atts){
                     const pid = parseInt(row.id || 0, 10) || 0;
                     if(pid <= 0) return;
                     const product = findById(pid);
-                    if(!product) return;
+                    const rowName = String(row.name || '').trim();
+                    const fallbackName = rowName || `محصول #${pid}`;
                     const allocatedQty = Math.max(0, parseInt(row.allocated_qty || 0, 10) || 0);
                     const pendingQty = Math.max(0, parseInt(row.pending_qty || 0, 10) || 0);
                     const requestedQty = Math.max(1, parseInt(row.qty || 0, 10) || 1);
-                    const mainStockNow = Math.max(0, findMainStockById(pid));
-                    const baseStockForEdit = Math.max(0, allocatedQty + mainStockNow);
+                    const rowMainStock = Number.isFinite(+row.wc_stock)
+                        ? (+row.wc_stock)
+                        : (Number.isFinite(+row.sale_base_stock) ? (+row.sale_base_stock) : 0);
+                    const rowTehStock = Number.isFinite(+row.teh_stock) ? (+row.teh_stock) : 0;
+                    const rowProdStock = Number.isFinite(+row.prod_stock)
+                        ? (+row.prod_stock)
+                        : (Number.isFinite(+row.stock) ? (+row.stock) : 0);
+                    const mainStockNow = Math.max(0, product ? findMainStockById(pid) : rowMainStock);
+                    const baseStockForEdit = Math.max(
+                        0,
+                        Number.isFinite(+row.sale_base_stock) ? (+row.sale_base_stock) : (allocatedQty + mainStockNow)
+                    );
                     items.push({
                         id: pid,
-                        name: product.label,
-                        stock: findProductionStockById(pid),
+                        name: product ? product.label : fallbackName,
+                        stock: Math.max(0, product ? findProductionStockById(pid) : rowProdStock),
                         qty: requestedQty,
                         sale_base_stock: baseStockForEdit,
                         sale_allocated_qty: allocatedQty,
-                        sale_pending_qty: pendingQty
+                        sale_pending_qty: pendingQty,
+                        wc_stock: Math.max(0, product ? findMainStockById(pid) : rowMainStock),
+                        teh_stock: Math.max(0, product ? (+product.teh_stock || 0) : rowTehStock),
+                        is_missing_product: !product
                     });
                 });
 
@@ -640,11 +654,32 @@ add_shortcode('stock_update_form', function($atts){
         function findById(id){ return allProducts.find(p => String(p.id) === String(id)); }
         function findLabelById(id){ const f = findById(id); return f ? f.label : ''; }
         function findProductionStockById(id){ const f = findById(id); return f ? (+f.prod_stock || 0) : 0; }
-        function findMainStockById(id){ const f = findById(id); return f ? (+f.wc_stock || 0) : 0; }
+        function findMainStockById(id, fallbackItem){
+            const f = findById(id);
+            if(f) return (+f.wc_stock || 0);
+            if(fallbackItem && Number.isFinite(+fallbackItem.wc_stock)) return (+fallbackItem.wc_stock || 0);
+            if(fallbackItem && Number.isFinite(+fallbackItem.sale_base_stock)) return (+fallbackItem.sale_base_stock || 0);
+            return 0;
+        }
+        function getItemWarehouseStock(it, warehouse){
+            const p = findById(it.id);
+            if(warehouse === 'main'){
+                if(p) return (+p.wc_stock || 0);
+                if(Number.isFinite(+it.wc_stock)) return (+it.wc_stock || 0);
+                if(Number.isFinite(+it.sale_base_stock)) return (+it.sale_base_stock || 0);
+                return 0;
+            }
+            if(warehouse === 'teh'){
+                if(p) return (+p.teh_stock || 0);
+                if(Number.isFinite(+it.teh_stock)) return (+it.teh_stock || 0);
+                return 0;
+            }
+            return 0;
+        }
         function recomputeSaleSplitForItem(it){
             if(!it) return;
             const requested = Math.max(0, parseInt(it.qty, 10) || 0);
-            const sourceStockRaw = Number.isFinite(+it.sale_base_stock) ? (+it.sale_base_stock) : findMainStockById(it.id);
+            const sourceStockRaw = Number.isFinite(+it.sale_base_stock) ? (+it.sale_base_stock) : findMainStockById(it.id, it);
             const sourceStock = Math.max(0, sourceStockRaw || 0);
             it.sale_allocated_qty = Math.min(requested, sourceStock);
             it.sale_pending_qty = Math.max(0, requested - it.sale_allocated_qty);
@@ -874,6 +909,8 @@ add_shortcode('stock_update_form', function($atts){
         }
 
         function findTransferSourceStockById(id){
+            const it = items.find(x => String(x.id) === String(id));
+            if(it) return getItemWarehouseStock(it, transferSource);
             const p = findById(id);
             return getTransferWarehouseStockByProduct(p, transferSource);
         }
@@ -978,23 +1015,27 @@ add_shortcode('stock_update_form', function($atts){
             items.forEach((it,idx)=>{
                 const tr = $('<tr style="border-top:1px solid #e5e7eb">');
                 tr.append(`<td style="padding:8px">${escapeHtml(it.id)}</td>`);
-                tr.append(`<td style="padding:8px">${escapeHtml(it.name)}</td>`);
+                const missingBadge = it.is_missing_product
+                    ? '<div style="margin-top:4px"><span style="display:inline-block; background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; border-radius:999px; padding:2px 8px; font-size:12px; font-weight:700">محصول در لیست فعلی نیست</span></div>'
+                    : '';
+                tr.append(`<td style="padding:8px">${escapeHtml(it.name)}${missingBadge}</td>`);
                 const sourceStock = isTransfer ? findTransferSourceStockById(it.id) : it.stock;
                 tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(sourceStock)}</td>`);
 
                 if (isOutMain || isOutTeh){
-                    const dst = getDestinationInfoById(it.id);
+                    const dst = it.is_missing_product
+                        ? { label:'', stock:getItemWarehouseStock(it, outDestination) }
+                        : getDestinationInfoById(it.id);
                     tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(dst.stock)}</td>`);
                 } else if (isTransfer){
                     const p = findById(it.id);
-                    const dstStock = getTransferWarehouseStockByProduct(p, transferDestination);
+                    const dstStock = it.is_missing_product ? getItemWarehouseStock(it, transferDestination) : getTransferWarehouseStockByProduct(p, transferDestination);
                     tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(dstStock)}</td>`);
                 } else if (isReturnMain || isReturnTeh){
-                    const p = findById(it.id);
-                    const returnStock = (returnDestination === 'main') ? (+p.wc_stock || 0) : (+p.teh_stock || 0);
+                    const returnStock = getItemWarehouseStock(it, returnDestination);
                     tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(returnStock)}</td>`);
                 } else if (isSaleOperation){
-                    const baseMainStock = Math.max(0, Number.isFinite(+it.sale_base_stock) ? (+it.sale_base_stock) : findMainStockById(it.id));
+                    const baseMainStock = Math.max(0, Number.isFinite(+it.sale_base_stock) ? (+it.sale_base_stock) : findMainStockById(it.id, it));
                     const remainingMainStock = Math.max(0, baseMainStock - (parseInt(it.qty, 10) || 0));
                     tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(remainingMainStock)}</td>`);
                 }

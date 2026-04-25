@@ -15,6 +15,7 @@ register_activation_hook(WC_SUF_PLUGIN_FILE, function(){
     $move_table = $wpdb->prefix.'stock_production_moves';
     $prod_table = $wpdb->prefix.'stock_production_inventory';
     $move_table = $wpdb->prefix.'stock_production_moves';
+    $sale_pending_table = $wpdb->prefix.'wc_suf_sale_pending_items';
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH.'wp-admin/includes/upgrade.php';
 
@@ -87,6 +88,19 @@ register_activation_hook(WC_SUF_PLUGIN_FILE, function(){
       KEY `created_at` (`created_at`)
     ) $charset;";
     dbDelta($sql_moves);
+    $sql_pending = "CREATE TABLE `$sale_pending_table` (
+      `order_id` BIGINT UNSIGNED NOT NULL,
+      `product_id` BIGINT UNSIGNED NOT NULL,
+      `requested_qty` INT UNSIGNED NOT NULL DEFAULT 0,
+      `allocated_qty` INT UNSIGNED NOT NULL DEFAULT 0,
+      `pending_qty` INT UNSIGNED NOT NULL DEFAULT 0,
+      `updated_at` DATETIME NOT NULL,
+      UNIQUE KEY `order_product` (`order_id`, `product_id`),
+      KEY `order_id` (`order_id`),
+      KEY `product_id` (`product_id`),
+      KEY `updated_at` (`updated_at`)
+    ) $charset;";
+    dbDelta($sql_pending);
     add_option('wc_suf_db_version', '2.6.0');
 
     if ( get_option('wc_suf_counter_in', null) === null )        add_option('wc_suf_counter_in',  '0', '', false);
@@ -105,6 +119,7 @@ register_activation_hook(WC_SUF_PLUGIN_FILE, function(){
     if ( is_numeric($max_transfer) && (int)$max_transfer > (int)get_option('wc_suf_counter_transfer', '0') )  update_option('wc_suf_counter_transfer', (string) (int)$max_transfer );
 });
 add_action('plugins_loaded', function(){ wc_suf_maybe_upgrade_schema(); });
+add_action('plugins_loaded', function(){ wc_suf_migrate_pending_breakdown_meta_once(); }, 20);
 
 function wc_suf_maybe_upgrade_schema(){
     global $wpdb;
@@ -118,6 +133,7 @@ function wc_suf_maybe_upgrade_schema(){
 
     $prod_table = $wpdb->prefix.'stock_production_inventory';
     $move_table = $wpdb->prefix.'stock_production_moves';
+    $sale_pending_table = $wpdb->prefix.'wc_suf_sale_pending_items';
 
     dbDelta("CREATE TABLE `$prod_table` (
       `product_id` BIGINT UNSIGNED NOT NULL,
@@ -157,6 +173,19 @@ function wc_suf_maybe_upgrade_schema(){
       KEY `batch_code` (`batch_code`),
       KEY `operation` (`operation`),
       KEY `created_at` (`created_at`)
+    ) $charset;");
+
+    dbDelta("CREATE TABLE `$sale_pending_table` (
+      `order_id` BIGINT UNSIGNED NOT NULL,
+      `product_id` BIGINT UNSIGNED NOT NULL,
+      `requested_qty` INT UNSIGNED NOT NULL DEFAULT 0,
+      `allocated_qty` INT UNSIGNED NOT NULL DEFAULT 0,
+      `pending_qty` INT UNSIGNED NOT NULL DEFAULT 0,
+      `updated_at` DATETIME NOT NULL,
+      UNIQUE KEY `order_product` (`order_id`, `product_id`),
+      KEY `order_id` (`order_id`),
+      KEY `product_id` (`product_id`),
+      KEY `updated_at` (`updated_at`)
     ) $charset;");
 
     if ( ! $exists ) return;
@@ -219,3 +248,82 @@ function wc_suf_maybe_upgrade_schema(){
     if ( get_option('wc_suf_counter_transfer', null) === null ) add_option('wc_suf_counter_transfer', '0', '', false);
 }
 
+function wc_suf_migrate_pending_breakdown_meta_once() {
+    if ( get_option( 'wc_suf_pending_items_migration_v1_done', '0' ) === '1' ) {
+        return;
+    }
+    if ( ! function_exists( 'wc_get_orders' ) ) {
+        return;
+    }
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'wc_suf_sale_pending_items';
+    $migrated_count = 0;
+    $page = 1;
+    $per_page = 100;
+
+    do {
+        $orders = wc_get_orders([
+            'type'      => 'shop_order',
+            'limit'     => $per_page,
+            'page'      => $page,
+            'orderby'   => 'date',
+            'order'     => 'DESC',
+            'meta_key'  => '_wc_suf_pending_breakdown',
+            'meta_compare' => 'EXISTS',
+            'return'    => 'objects',
+        ]);
+        if ( ! is_array( $orders ) || empty( $orders ) ) {
+            break;
+        }
+
+        foreach ( $orders as $order ) {
+            if ( ! $order || ! is_a( $order, 'WC_Order' ) ) {
+                continue;
+            }
+            $rows = json_decode( (string) $order->get_meta( '_wc_suf_pending_breakdown', true ), true );
+            if ( ! is_array( $rows ) || empty( $rows ) ) {
+                continue;
+            }
+            $order_id = (int) $order->get_id();
+            if ( $order_id <= 0 ) {
+                continue;
+            }
+            foreach ( $rows as $row ) {
+                $pid = absint( $row['product_id'] ?? 0 );
+                if ( $pid <= 0 ) {
+                    continue;
+                }
+                $requested = max( 0, (int) ( $row['requested_qty'] ?? 0 ) );
+                $allocated = max( 0, (int) ( $row['allocated_qty'] ?? 0 ) );
+                $pending = max( 0, (int) ( $row['pending_qty'] ?? 0 ) );
+                if ( $requested <= 0 && $allocated <= 0 && $pending <= 0 ) {
+                    continue;
+                }
+                $wpdb->query(
+                    $wpdb->prepare(
+                        "INSERT INTO `$table` (`order_id`, `product_id`, `requested_qty`, `allocated_qty`, `pending_qty`, `updated_at`)
+                         VALUES (%d, %d, %d, %d, %d, %s)
+                         ON DUPLICATE KEY UPDATE
+                            `requested_qty` = VALUES(`requested_qty`),
+                            `allocated_qty` = VALUES(`allocated_qty`),
+                            `pending_qty` = VALUES(`pending_qty`),
+                            `updated_at` = VALUES(`updated_at`)",
+                        $order_id,
+                        $pid,
+                        $requested,
+                        $allocated,
+                        $pending,
+                        current_time( 'mysql' )
+                    )
+                );
+                $migrated_count++;
+            }
+        }
+        $page++;
+    } while ( count( $orders ) === $per_page );
+
+    update_option( 'wc_suf_pending_items_migration_v1_done', '1', false );
+    update_option( 'wc_suf_pending_items_migration_v1_count', (string) (int) $migrated_count, false );
+    error_log( '[wc_suf] pending items migration completed. Migrated rows: ' . (int) $migrated_count );
+}
