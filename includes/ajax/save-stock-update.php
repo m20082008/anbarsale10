@@ -220,11 +220,13 @@ function wc_suf_get_sale_order_for_edit_handler(){
     }
 
     $items = [];
+    $seen_pids = [];
     foreach ( $order->get_items('line_item') as $item ) {
         if ( ! is_a( $item, 'WC_Order_Item_Product' ) ) continue;
         $pid = (int) $item->get_variation_id();
         if ( $pid <= 0 ) $pid = (int) $item->get_product_id();
         if ( $pid <= 0 ) continue;
+        $seen_pids[ $pid ] = true;
         $qty = max( 0, (int) $item->get_quantity() );
         if ( $qty <= 0 ) continue;
         $pending_qty = max( 0, (int) ( $pending_map[ $pid ] ?? 0 ) );
@@ -233,6 +235,21 @@ function wc_suf_get_sale_order_for_edit_handler(){
             'name'          => (string) $item->get_name(),
             'qty'           => $qty + $pending_qty,
             'allocated_qty' => $qty,
+            'pending_qty'   => $pending_qty,
+        ];
+    }
+    foreach ( $pending_map as $pid => $pending_qty ) {
+        $pid = absint( $pid );
+        $pending_qty = max( 0, (int) $pending_qty );
+        if ( $pid <= 0 || $pending_qty <= 0 || isset( $seen_pids[ $pid ] ) ) {
+            continue;
+        }
+        $product = wc_get_product( $pid );
+        $items[] = [
+            'id'            => $pid,
+            'name'          => $product ? (string) $product->get_name() : ( 'محصول #' . $pid ),
+            'qty'           => $pending_qty,
+            'allocated_qty' => 0,
             'pending_qty'   => $pending_qty,
         ];
     }

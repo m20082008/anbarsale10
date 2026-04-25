@@ -586,14 +586,19 @@ add_shortcode('stock_update_form', function($atts){
                     if(pid <= 0) return;
                     const product = findById(pid);
                     if(!product) return;
+                    const allocatedQty = Math.max(0, parseInt(row.allocated_qty || 0, 10) || 0);
+                    const pendingQty = Math.max(0, parseInt(row.pending_qty || 0, 10) || 0);
+                    const requestedQty = Math.max(1, parseInt(row.qty || 0, 10) || 1);
+                    const mainStockNow = Math.max(0, findMainStockById(pid));
+                    const baseStockForEdit = Math.max(0, allocatedQty + mainStockNow);
                     items.push({
                         id: pid,
                         name: product.label,
                         stock: findProductionStockById(pid),
-                        qty: Math.max(1, parseInt(row.qty || 0, 10) || 1),
-                        sale_base_stock: findMainStockById(pid),
-                        sale_allocated_qty: Math.max(0, parseInt(row.allocated_qty || 0, 10) || 0),
-                        sale_pending_qty: Math.max(0, parseInt(row.pending_qty || 0, 10) || 0)
+                        qty: requestedQty,
+                        sale_base_stock: baseStockForEdit,
+                        sale_allocated_qty: allocatedQty,
+                        sale_pending_qty: pendingQty
                     });
                 });
 
