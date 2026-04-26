@@ -1724,6 +1724,7 @@ add_shortcode('stock_update_form', function($atts){
                         const refreshIdsRaw = (res.data && Array.isArray(res.data.product_ids)) ? res.data.product_ids : submittedProductIds;
 
                         const finishSaveUi = function(refreshFailed){
+                            const shouldReloadForEditPending = (mode === 'pending_review' && isEditModeActive);
                             items.length = 0;
                             opType = null;
                             outDestination = null;
@@ -1772,6 +1773,9 @@ add_shortcode('stock_update_form', function($atts){
                             }
                             $('#save-result').html(html).show();
                             alert(msg);
+                            if(shouldReloadForEditPending){
+                                window.location.reload();
+                            }
                         };
 
                         refreshStocksBeforeResult(refreshIdsRaw).done(function(refreshRes){
