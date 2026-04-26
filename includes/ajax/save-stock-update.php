@@ -724,6 +724,45 @@ function wc_suf_save_stock_update_handler(){
         }
     }
 
+    $sale_edit_existing_qty_map = [];
+    if ( ( $op_type === 'sale' || $op_type === 'sale_teh' ) && $sale_hold_order_id > 0 ) {
+        $sale_edit_order = wc_get_order( $sale_hold_order_id );
+        if ( ! $sale_edit_order ) {
+            if ( $tx_started ) {
+                $wpdb->query('ROLLBACK');
+            }
+            wp_send_json_error(['message' => 'سفارش انتخاب‌شده برای ویرایش یافت نشد.']);
+        }
+
+        $sale_edit_order_error = '';
+        if ( ! wc_suf_validate_sale_order_edit_access( $sale_edit_order, $uid, $sale_edit_order_error ) ) {
+            if ( $tx_started ) {
+                $wpdb->query('ROLLBACK');
+            }
+            wp_send_json_error(['message' => $sale_edit_order_error ?: 'این سفارش قابل ویرایش نیست.']);
+        }
+        if ( ! wc_suf_is_sale_order_editable_in_finalize( $sale_edit_order ) ) {
+            if ( $tx_started ) {
+                $wpdb->query('ROLLBACK');
+            }
+            wp_send_json_error(['message' => 'این سفارش نهایی شده و قابل ویرایش نیست.']);
+        }
+
+        foreach ( $sale_edit_order->get_items('line_item') as $existing_item ) {
+            if ( ! is_a( $existing_item, 'WC_Order_Item_Product' ) ) {
+                continue;
+            }
+            $existing_pid = (int) $existing_item->get_variation_id();
+            if ( $existing_pid <= 0 ) {
+                $existing_pid = (int) $existing_item->get_product_id();
+            }
+            if ( $existing_pid <= 0 ) {
+                continue;
+            }
+            $sale_edit_existing_qty_map[ $existing_pid ] = max( 0, (int) $existing_item->get_quantity() );
+        }
+    }
+
     if ($op_type === 'out' || $op_type === 'transfer' || $op_type === 'sale' || $op_type === 'sale_teh') {
         $insufficient = [];
         $locked_old_qty = [];
@@ -759,7 +798,12 @@ function wc_suf_save_stock_update_handler(){
             $pname = wc_suf_full_product_label( $product );
             $locked_old_qty[$pid] = $old;
 
-            if( $req > $old ){
+            $effective_available = $old;
+            if ( $op_type === 'sale' || $op_type === 'sale_teh' ) {
+                $effective_available += (int) ( $sale_edit_existing_qty_map[ $pid ] ?? 0 );
+            }
+
+            if( $req > $effective_available ){
                 if ( in_array( $op_type, ['sale','sale_teh'], true ) && $sale_submit_mode === 'pending_review' ) {
                     continue;
                 }
@@ -767,7 +811,7 @@ function wc_suf_save_stock_update_handler(){
                     'id'   => $pid,
                     'name' => $pname,
                     'req'  => $req,
-                    'have' => $old,
+                    'have' => $effective_available,
                 ];
             }
         }
