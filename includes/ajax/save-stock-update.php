@@ -8,6 +8,10 @@ add_action('wp_ajax_wc_suf_complete_pending_sale','wc_suf_complete_pending_sale_
 add_action('wp_ajax_wc_suf_pending_products_report','wc_suf_pending_products_report_handler');
 add_action('wp_ajax_wc_suf_get_sale_order_for_edit','wc_suf_get_sale_order_for_edit_handler');
 
+function wc_suf_current_user_can_edit_any_sale_order() {
+    return current_user_can( 'manage_woocommerce' ) || current_user_can( 'manage_options' );
+}
+
 function wc_suf_get_sale_method_labels() {
     return [
         'main_onsite'       => '۱- فروش حضوری انبار اصلی',
@@ -158,21 +162,28 @@ function wc_suf_validate_sale_order_edit_access( $order, $current_user_id, &$err
         return false;
     }
 
-    $seller_id = absint( $order->get_meta('_wc_suf_seller_id', true ) );
-    if ( $seller_id <= 0 || $seller_id !== (int) $current_user_id ) {
-        $error_message = 'شما مالک این سفارش نیستید.';
-        return false;
-    }
+    $can_edit_any_order = wc_suf_current_user_can_edit_any_sale_order();
+    if ( ! $can_edit_any_order ) {
+        $seller_id = absint( $order->get_meta('_wc_suf_seller_id', true ) );
+        if ( $seller_id <= 0 || $seller_id !== (int) $current_user_id ) {
+            $error_message = 'شما مالک این سفارش نیستید.';
+            return false;
+        }
 
-    $created_via = (string) $order->get_created_via();
-    if ( ! in_array( $created_via, [ 'wc_suf_manual_sale', 'wc_suf_manual_sale_hold' ], true ) ) {
-        $error_message = 'فقط سفارش‌های فروش دستی قابل ویرایش هستند.';
-        return false;
+        $created_via = (string) $order->get_created_via();
+        if ( ! in_array( $created_via, [ 'wc_suf_manual_sale', 'wc_suf_manual_sale_hold' ], true ) ) {
+            $error_message = 'فقط سفارش‌های فروش دستی قابل ویرایش هستند.';
+            return false;
+        }
     }
 
     $status = (string) $order->get_status();
     if ( in_array( $status, [ 'cancelled', 'trash' ], true ) ) {
         $error_message = 'سفارش لغوشده قابل ویرایش نیست.';
+        return false;
+    }
+    if ( ! $can_edit_any_order && in_array( $status, [ 'completed' ], true ) ) {
+        $error_message = 'سفارش تکمیل‌شده قابل ویرایش نیست.';
         return false;
     }
 
@@ -272,6 +283,9 @@ function wc_suf_is_sale_order_editable_in_finalize( $order ) {
         return false;
     }
     $status = (string) $order->get_status();
+    if ( wc_suf_current_user_can_edit_any_sale_order() ) {
+        return ! in_array( $status, [ 'cancelled', 'refunded', 'failed', 'trash' ], true );
+    }
     return ! in_array( $status, [ 'completed', 'cancelled', 'refunded', 'failed', 'trash' ], true );
 }
 
