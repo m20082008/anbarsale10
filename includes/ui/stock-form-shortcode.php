@@ -1965,25 +1965,43 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         echo '</tr>';
     }
     echo '</tbody></table>';
-    echo '<div id="wc-suf-complete-order-toast" style="display:none; position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:99999; min-width:260px; max-width:min(92vw, 540px); padding:12px 14px; border-radius:12px; border:1px solid transparent; box-shadow:0 10px 24px rgba(15,23,42,.18); font-weight:700; text-align:center"></div>';
+    echo '<div id="wc-suf-complete-order-toast" style="display:none; position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:99999; min-width:260px; max-width:min(92vw, 540px); padding:12px 14px; border-radius:12px; border:1px solid transparent; box-shadow:0 10px 24px rgba(15,23,42,.18); font-weight:700">';
+    echo '<div style="display:flex; align-items:center; gap:10px">';
+    echo '<div id="wc-suf-complete-order-toast-text" style="flex:1; text-align:right"></div>';
+    echo '<button type="button" id="wc-suf-complete-order-toast-close" aria-label="بستن پیام" style="border:1px solid currentColor; background:transparent; color:inherit; border-radius:8px; cursor:pointer; font-weight:800; padding:2px 8px; line-height:1.4">✕</button>';
+    echo '</div></div>';
     echo '</div>';
     ?>
     <script>
     jQuery(function($){
         const ajaxurl = "<?php echo esc_js( admin_url('admin-ajax.php') ); ?>";
         const nonce = "<?php echo esc_js( wp_create_nonce('wc_suf_complete_pending_sale') ); ?>";
+        let completeOrderToastTimer = null;
         function showCompleteOrderToast(message, isSuccess){
             const bg = isSuccess ? '#ecfdf5' : '#fef2f2';
             const color = isSuccess ? '#065f46' : '#b91c1c';
             const borderColor = isSuccess ? '#10b981' : '#fca5a5';
+            if(completeOrderToastTimer){
+                clearTimeout(completeOrderToastTimer);
+                completeOrderToastTimer = null;
+            }
+            $('#wc-suf-complete-order-toast-text').text(message);
             $('#wc-suf-complete-order-toast')
                 .stop(true, true)
                 .css({background:bg, color:color, borderColor:borderColor})
-                .text(message)
-                .fadeIn(160)
-                .delay(2200)
-                .fadeOut(260);
+                .fadeIn(160);
+            completeOrderToastTimer = setTimeout(function(){
+                $('#wc-suf-complete-order-toast').fadeOut(260);
+                completeOrderToastTimer = null;
+            }, 3200);
         }
+        $(document).on('click', '#wc-suf-complete-order-toast-close', function(){
+            if(completeOrderToastTimer){
+                clearTimeout(completeOrderToastTimer);
+                completeOrderToastTimer = null;
+            }
+            $('#wc-suf-complete-order-toast').stop(true, true).fadeOut(120);
+        });
 
         $(document).on('click', '.wc-suf-complete-order-btn', function(){
             const $btn = $(this);
