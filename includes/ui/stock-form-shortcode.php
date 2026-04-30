@@ -1830,14 +1830,18 @@ add_shortcode('wc_suf_my_sale_orders', function(){
     }
 
     $user_id = get_current_user_id();
-    $orders = wc_get_orders([
+    $can_edit_any_order = current_user_can( 'manage_woocommerce' ) || current_user_can( 'manage_options' );
+    $orders_query_args = [
         'type'       => 'shop_order',
         'limit'      => 200,
         'orderby'    => 'date',
         'order'      => 'DESC',
-        'meta_key'   => '_wc_suf_seller_id',
-        'meta_value' => $user_id,
-    ]);
+    ];
+    if ( ! $can_edit_any_order ) {
+        $orders_query_args['meta_key'] = '_wc_suf_seller_id';
+        $orders_query_args['meta_value'] = $user_id;
+    }
+    $orders = wc_get_orders( $orders_query_args );
 
     $stock_form_url = '';
     $stock_form_pages = get_posts([
@@ -1858,7 +1862,7 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         'wc_suf_pending_products_report'
     );
     echo '<div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap">';
-    echo '<h3 style="margin:0">سفارش‌های ثبت‌شده توسط من</h3>';
+    echo '<h3 style="margin:0">' . ( $can_edit_any_order ? 'همه سفارش‌ها' : 'سفارش‌های ثبت‌شده توسط من' ) . '</h3>';
     echo '<a href="' . esc_url( $pending_report_url ) . '" target="_blank" rel="noopener" style="display:inline-flex; align-items:center; padding:8px 12px; border:1px solid #1d4ed8; background:#1d4ed8; color:#fff; border-radius:8px; text-decoration:none; font-weight:700">گزارش کل محصولات در انتظار</a>';
     echo '</div>';
     if ( empty($orders) ) {
@@ -1886,8 +1890,16 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         $status = (string) $order->get_status();
         $is_manual_sale = in_array( $created_via, [ 'wc_suf_manual_sale', 'wc_suf_manual_sale_hold' ], true );
         $is_owner = ( $seller_id > 0 && $seller_id === $user_id );
+        $is_completed = in_array( $status, [ 'completed' ], true );
         $is_cancelled = in_array( $status, [ 'cancelled', 'trash' ], true );
-        $can_edit_order = ( $is_owner && $is_manual_sale && ! $is_cancelled && ! empty( $stock_form_url ) );
+        $can_edit_order = (
+            ! empty( $stock_form_url )
+            && ! $is_cancelled
+            && (
+                $can_edit_any_order
+                || ( $is_owner && $is_manual_sale && ! $is_completed )
+            )
+        );
         $edit_url = $can_edit_order ? add_query_arg([
             'mode'     => 'edit',
             'order_id' => $order_id,
@@ -1895,10 +1907,12 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         $edit_block_reason = '';
         if ( empty( $stock_form_url ) ) {
             $edit_block_reason = 'صفحه فرم یافت نشد';
-        } elseif ( ! $is_owner ) {
+        } elseif ( ! $can_edit_any_order && ! $is_owner ) {
             $edit_block_reason = 'مالک سفارش نیستید';
-        } elseif ( ! $is_manual_sale ) {
+        } elseif ( ! $can_edit_any_order && ! $is_manual_sale ) {
             $edit_block_reason = 'فقط فروش دستی قابل ویرایش است';
+        } elseif ( ! $can_edit_any_order && $is_completed ) {
+            $edit_block_reason = 'سفارش تکمیل‌شده قابل ویرایش نیست';
         } elseif ( $is_cancelled ) {
             $edit_block_reason = 'سفارش لغو شده است';
         }
