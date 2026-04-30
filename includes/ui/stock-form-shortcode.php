@@ -1965,13 +1965,26 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         echo '</tr>';
     }
     echo '</tbody></table>';
-    echo '<div id="wc-suf-complete-order-result" style="display:none; margin-top:10px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:10px; background:#f9fafb"></div>';
+    echo '<div id="wc-suf-complete-order-toast" style="display:none; position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:99999; min-width:260px; max-width:min(92vw, 540px); padding:12px 14px; border-radius:12px; border:1px solid transparent; box-shadow:0 10px 24px rgba(15,23,42,.18); font-weight:700; text-align:center"></div>';
     echo '</div>';
     ?>
     <script>
     jQuery(function($){
         const ajaxurl = "<?php echo esc_js( admin_url('admin-ajax.php') ); ?>";
         const nonce = "<?php echo esc_js( wp_create_nonce('wc_suf_complete_pending_sale') ); ?>";
+        function showCompleteOrderToast(message, isSuccess){
+            const bg = isSuccess ? '#ecfdf5' : '#fef2f2';
+            const color = isSuccess ? '#065f46' : '#b91c1c';
+            const borderColor = isSuccess ? '#10b981' : '#fca5a5';
+            $('#wc-suf-complete-order-toast')
+                .stop(true, true)
+                .css({background:bg, color:color, borderColor:borderColor})
+                .text(message)
+                .fadeIn(160)
+                .delay(2200)
+                .fadeOut(260);
+        }
+
         $(document).on('click', '.wc-suf-complete-order-btn', function(){
             const $btn = $(this);
             const orderId = parseInt($btn.data('order-id'), 10) || 0;
@@ -1984,16 +1997,12 @@ add_shortcode('wc_suf_my_sale_orders', function(){
             }).done(function(res){
                 const ok = !!(res && res.success);
                 const msg = (res && res.data && res.data.message) ? res.data.message : (ok ? 'انجام شد.' : 'ناموفق بود.');
-                $('#wc-suf-complete-order-result')
-                    .html('<div style="font-weight:700; color:'+(ok ? '#065f46' : '#b91c1c')+'">'+msg+'</div>')
-                    .show();
+                showCompleteOrderToast(msg, ok);
                 if(ok){
                     setTimeout(function(){ window.location.reload(); }, 600);
                 }
             }).fail(function(){
-                $('#wc-suf-complete-order-result')
-                    .html('<div style="font-weight:700; color:#b91c1c">خطای ارتباطی در تکمیل سفارش.</div>')
-                    .show();
+                showCompleteOrderToast('خطای ارتباطی در تکمیل سفارش.', false);
             }).always(function(){
                 $btn.prop('disabled', false).css({opacity:1, cursor:'pointer'}).text('تکمیل سفارش');
             });
