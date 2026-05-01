@@ -878,15 +878,23 @@ add_shortcode('stock_update_form', function($atts){
             return items.length > 0;
         }
         function canSavePending(){
+            if(opType !== 'sale' && opType !== 'sale_teh') return false;
             return canSave();
         }
         function refreshActionButtons(){
+            const isSaleOperation = (opType === 'sale' || opType === 'sale_teh');
             if(items.length <= 0){
                 $('#btn-save').prop('disabled', true).hide();
                 $('#btn-save-pending').prop('disabled', true).hide();
                 return;
             }
-            refreshActionButtons();
+            const hasPending = hasAnyPendingSaleItem();
+            $('#btn-save').show().prop('disabled', !canSave() || hasPending);
+            if(isSaleOperation){
+                $('#btn-save-pending').show().prop('disabled', !canSavePending());
+            }else{
+                $('#btn-save-pending').prop('disabled', true).hide();
+            }
         }
 
         function canOpenPicker(){
@@ -1027,7 +1035,11 @@ add_shortcode('stock_update_form', function($atts){
             $('#items-table').show();
             const hasPending = hasAnyPendingSaleItem();
             $('#btn-save').show().prop('disabled', !canSave() || hasPending);
-            $('#btn-save-pending').show().prop('disabled', !canSavePending());
+            if(isSaleOperation){
+                $('#btn-save-pending').show().prop('disabled', !canSavePending());
+            }else{
+                $('#btn-save-pending').prop('disabled', true).hide();
+            }
             const grandTotal = items.reduce((sum, it) => sum + (parseInt(it.qty, 10) || 0), 0);
             $('#items-total-value').text(String(grandTotal));
             $('#items-total-wrap').show();
@@ -1727,7 +1739,7 @@ add_shortcode('stock_update_form', function($atts){
         });
 
         let submitting = false;
-        function submitOrder(submitMode){
+        function submitOrder(submitMode, skipConfirm){
             if (submitting) return;
             const mode = (submitMode === 'pending_review') ? 'pending_review' : 'final';
             if (mode === 'pending_review') {
@@ -1739,8 +1751,8 @@ add_shortcode('stock_update_form', function($atts){
 
             const submittedProductIds = items.map(function(it){ return parseInt(it.id, 10); }).filter(function(v){ return Number.isFinite(v) && v > 0; });
 
-            if (opType === 'in' || opType === 'out' || opType === 'transfer' || opType === 'return'){
-                askForConfirmation(buildSubmitConfirmMessage(), function(){ submitOrder(mode); }, function(){});
+            if (!skipConfirm && (opType === 'in' || opType === 'out' || opType === 'transfer' || opType === 'return')){
+                askForConfirmation(buildSubmitConfirmMessage(), function(){ submitOrder(mode, true); }, function(){});
                 return;
             }
 
