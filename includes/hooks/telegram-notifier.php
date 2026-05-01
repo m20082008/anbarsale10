@@ -53,6 +53,24 @@ function wc_suf_telegram_money( $amount, $currency ) {
     return trim( preg_replace( '/\s+/u', ' ', html_entity_decode( $text, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) );
 }
 
+function wc_suf_telegram_format_product_name_with_code( $name, $product ) {
+    $name = trim( (string) $name );
+    if ( $name === '' ) {
+        $name = 'محصول';
+    }
+
+    if ( ! ( $product instanceof WC_Product ) ) {
+        return $name;
+    }
+
+    $product_code = trim( (string) $product->get_sku() );
+    if ( $product_code === '' ) {
+        $product_code = (string) $product->get_id();
+    }
+
+    return sprintf( '%s (%s)', $name, $product_code );
+}
+
 function wc_suf_telegram_detect_order_source( WC_Order $order ) {
     $is_yith_pos = false;
     foreach ( [ '_yith_pos_order', '_yith_pos_gateway', '_yith_pos_store', '_yith_pos_register' ] as $meta_key ) {
@@ -75,6 +93,67 @@ function wc_suf_telegram_detect_order_source( WC_Order $order ) {
 }
 
 function wc_suf_telegram_get_pending_items( WC_Order $order ) {
+    $breakdown_raw = $order->get_meta( '_wc_suf_pending_breakdown', true );
+    if ( is_string( $breakdown_raw ) && strpos( $breakdown_raw, '[' ) === 0 ) {
+        $breakdown_rows = json_decode( $breakdown_raw, true );
+        if ( is_array( $breakdown_rows ) ) {
+            $lines = [];
+            $total = 0.0;
+            $pending_price_map_raw = $order->get_meta( '_wc_qof_pending_price_map', true );
+            $pending_price_map = [];
+            if ( is_string( $pending_price_map_raw ) && strpos( $pending_price_map_raw, '{' ) === 0 ) {
+                $decoded_price_map = json_decode( $pending_price_map_raw, true );
+                if ( is_array( $decoded_price_map ) ) {
+                    $pending_price_map = $decoded_price_map;
+                }
+            } elseif ( is_array( $pending_price_map_raw ) ) {
+                $pending_price_map = $pending_price_map_raw;
+            }
+            $unit_price_map = [];
+
+            foreach ( $order->get_items() as $item ) {
+                $pid = $item->get_product_id();
+                if ( $pid <= 0 ) {
+                    continue;
+                }
+                $qty = max( 1, (int) $item->get_quantity() );
+                $line_subtotal = (float) $item->get_subtotal();
+                if ( $line_subtotal <= 0 ) {
+                    $line_subtotal = (float) $item->get_total();
+                }
+                $unit_price_map[ $pid ] = $line_subtotal / $qty;
+            }
+
+            foreach ( $breakdown_rows as $row ) {
+                $pending_qty = max( 0, (int) ( $row['pending_qty'] ?? 0 ) );
+                if ( $pending_qty <= 0 ) {
+                    continue;
+                }
+                $product_id = absint( $row['product_id'] ?? 0 );
+                $product = $product_id > 0 ? wc_get_product( $product_id ) : null;
+                $base_name = trim( (string) ( $row['product_name'] ?? '' ) );
+                if ( $base_name === '' && $product ) {
+                    $base_name = $product->get_name();
+                }
+                $name = wc_suf_telegram_format_product_name_with_code( $base_name, $product );
+
+                $unit_price = isset( $pending_price_map[ $product_id ]['unit'] ) ? (float) $pending_price_map[ $product_id ]['unit'] : 0.0;
+                if ( $unit_price <= 0 ) {
+                    $unit_price = isset( $unit_price_map[ $product_id ] ) ? (float) $unit_price_map[ $product_id ] : 0.0;
+                }
+                if ( $unit_price <= 0 && $product ) {
+                    $unit_price = (float) $product->get_price();
+                }
+                $total += ( $unit_price * $pending_qty );
+                $lines[] = sprintf( '- %s | تعداد: %d', $name, $pending_qty );
+            }
+
+            if ( ! empty( $lines ) ) {
+                return [ 'text' => implode( "\n", $lines ), 'total' => $total ];
+            }
+        }
+    }
+
     $raw_items = $order->get_meta( '_wc_qof_pending_items', true );
     $raw_qty_map = $order->get_meta( '_wc_qof_pending_req_qty', true );
     $raw_price_map = $order->get_meta( '_wc_qof_pending_price_map', true );
@@ -154,7 +233,7 @@ function wc_suf_telegram_get_pending_items( WC_Order $order ) {
         }
         $qty = isset( $raw_qty_map[ $product_id ] ) ? (int) $raw_qty_map[ $product_id ] : 0;
         $product = wc_get_product( $product_id );
-        $name = $product ? $product->get_name() : ( '#' . $product_id );
+        $name = $product ? wc_suf_telegram_format_product_name_with_code( $product->get_name(), $product ) : ( '#' . $product_id );
 
         $line_total = isset( $raw_price_map[ $product_id ]['line'] ) ? (float) $raw_price_map[ $product_id ]['line'] : 0.0;
         if ( $line_total <= 0 && isset( $raw_price_map[ $product_id ]['unit'] ) ) {
@@ -221,7 +300,9 @@ function wc_suf_telegram_build_order_message( WC_Order $order ) {
     foreach ( $order->get_items() as $item ) {
         $qty = (int) $item->get_quantity();
         $allocated_total += (float) $item->get_total();
-        $allocated_lines[] = sprintf( '- %s | تعداد: %d', $item->get_name(), $qty );
+        $product = $item->get_product();
+        $product_name = wc_suf_telegram_format_product_name_with_code( $item->get_name(), $product );
+        $allocated_lines[] = sprintf( '- %s | تعداد: %d', $product_name, $qty );
     }
 
     $pending = wc_suf_telegram_get_pending_items( $order );
