@@ -99,6 +99,16 @@ function wc_suf_telegram_get_pending_items( WC_Order $order ) {
         if ( is_array( $breakdown_rows ) ) {
             $lines = [];
             $total = 0.0;
+            $pending_price_map_raw = $order->get_meta( '_wc_qof_pending_price_map', true );
+            $pending_price_map = [];
+            if ( is_string( $pending_price_map_raw ) && strpos( $pending_price_map_raw, '{' ) === 0 ) {
+                $decoded_price_map = json_decode( $pending_price_map_raw, true );
+                if ( is_array( $decoded_price_map ) ) {
+                    $pending_price_map = $decoded_price_map;
+                }
+            } elseif ( is_array( $pending_price_map_raw ) ) {
+                $pending_price_map = $pending_price_map_raw;
+            }
             $unit_price_map = [];
 
             foreach ( $order->get_items() as $item ) {
@@ -127,7 +137,10 @@ function wc_suf_telegram_get_pending_items( WC_Order $order ) {
                 }
                 $name = wc_suf_telegram_format_product_name_with_code( $base_name, $product );
 
-                $unit_price = isset( $unit_price_map[ $product_id ] ) ? (float) $unit_price_map[ $product_id ] : 0.0;
+                $unit_price = isset( $pending_price_map[ $product_id ]['unit'] ) ? (float) $pending_price_map[ $product_id ]['unit'] : 0.0;
+                if ( $unit_price <= 0 ) {
+                    $unit_price = isset( $unit_price_map[ $product_id ] ) ? (float) $unit_price_map[ $product_id ] : 0.0;
+                }
                 if ( $unit_price <= 0 && $product ) {
                     $unit_price = (float) $product->get_price();
                 }
