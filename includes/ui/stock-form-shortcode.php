@@ -433,6 +433,63 @@ add_shortcode('stock_update_form', function($atts){
         const userCode = urlKey || defaultShortcodeKey;
 
         const items = [];
+        let globalToastTimer = null;
+        const globalToastDurationMs = 5000;
+
+        function ensureGlobalFeedbackUi(){
+            if($('#wc-suf-global-toast').length === 0){
+                $('body').append(
+                    '<div id="wc-suf-global-toast" style="display:none; position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:99999; min-width:260px; max-width:min(92vw, 560px); padding:12px 14px; border-radius:12px; border:1px solid transparent; box-shadow:0 10px 24px rgba(15,23,42,.18); font-weight:700;">'
+                    + '<div style="display:flex; align-items:center; gap:10px">'
+                    + '<div id="wc-suf-global-toast-text" style="flex:1; text-align:right"></div>'
+                    + '<button type="button" id="wc-suf-global-toast-close" aria-label="بستن پیام" style="border:1px solid currentColor; background:transparent; color:inherit; border-radius:8px; cursor:pointer; font-weight:800; padding:2px 8px; line-height:1.4">✕</button>'
+                    + '</div></div>'
+                );
+            }
+            if($('#wc-suf-confirm-modal').length === 0){
+                $('body').append(
+                    '<div id="wc-suf-confirm-modal" style="display:none; position:fixed; inset:0; z-index:100000; background:rgba(15,23,42,.35); align-items:center; justify-content:center; padding:16px;">'
+                    + '<div style="width:min(92vw,460px); background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:0 18px 48px rgba(15,23,42,.25); padding:16px;">'
+                    + '<div id="wc-suf-confirm-modal-text" style="font-weight:700; color:#0f172a; line-height:1.9; margin-bottom:14px; white-space:pre-line;"></div>'
+                    + '<div style="display:flex; justify-content:flex-start; direction:rtl; gap:10px;">'
+                    + '<button type="button" id="wc-suf-confirm-ok" style="padding:8px 14px; border:1px solid #2563eb; border-radius:10px; background:#2563eb; color:#fff; font-weight:700; cursor:pointer">بله</button>'
+                    + '<button type="button" id="wc-suf-confirm-cancel" style="padding:8px 14px; border:1px solid #94a3b8; border-radius:10px; background:#fff; color:#334155; font-weight:700; cursor:pointer">لغو</button>'
+                    + '</div></div></div>'
+                );
+            }
+        }
+        ensureGlobalFeedbackUi();
+
+        function showGlobalToast(message, isSuccess){
+            const msg = String(message || '');
+            const bg = isSuccess ? '#ecfdf5' : '#fef2f2';
+            const color = isSuccess ? '#065f46' : '#b91c1c';
+            const borderColor = isSuccess ? '#10b981' : '#fca5a5';
+            if(globalToastTimer){ clearTimeout(globalToastTimer); globalToastTimer = null; }
+            $('#wc-suf-global-toast-text').text(msg);
+            $('#wc-suf-global-toast').stop(true, true).css({background:bg, color:color, borderColor:borderColor}).fadeIn(160);
+            globalToastTimer = setTimeout(function(){
+                $('#wc-suf-global-toast').fadeOut(260);
+                globalToastTimer = null;
+            }, globalToastDurationMs);
+        }
+        $(document).on('click', '#wc-suf-global-toast-close', function(){
+            if(globalToastTimer){ clearTimeout(globalToastTimer); globalToastTimer = null; }
+            $('#wc-suf-global-toast').stop(true, true).fadeOut(120);
+        });
+
+        function askForConfirmation(message, onOk, onCancel){
+            $('#wc-suf-confirm-modal-text').text(String(message || ''));
+            $('#wc-suf-confirm-modal').fadeIn(120).css('display', 'flex');
+            $('#wc-suf-confirm-ok').off('click').on('click', function(){
+                $('#wc-suf-confirm-modal').fadeOut(120);
+                if(typeof onOk === 'function') onOk();
+            });
+            $('#wc-suf-confirm-cancel').off('click').on('click', function(){
+                $('#wc-suf-confirm-modal').fadeOut(120);
+                if(typeof onCancel === 'function') onCancel();
+            });
+        }
         let opType = null;
         let outDestination = null;
         let transferSource = null;
@@ -773,11 +830,11 @@ add_shortcode('stock_update_form', function($atts){
                 if(res && res.success && res.data && res.data.order_id){
                     saleHoldOrderId = parseInt(res.data.order_id, 10) || 0;
                 } else if (showErrors) {
-                    alert((res && res.data && res.data.message) ? res.data.message : 'خطا در همگام‌سازی سفارش هولد.');
+                    showGlobalToast((res && res.data && res.data.message) ? res.data.message : 'خطا در همگام‌سازی سفارش هولد.', false);
                 }
             }).fail(function(){
                 if(showErrors){
-                    alert('خطای ارتباطی هنگام همگام‌سازی سفارش هولد.');
+                    showGlobalToast('خطای ارتباطی هنگام همگام‌سازی سفارش هولد.', false);
                 }
             });
         }
@@ -821,15 +878,23 @@ add_shortcode('stock_update_form', function($atts){
             return items.length > 0;
         }
         function canSavePending(){
+            if(opType !== 'sale' && opType !== 'sale_teh') return false;
             return canSave();
         }
         function refreshActionButtons(){
+            const isSaleOperation = (opType === 'sale' || opType === 'sale_teh');
             if(items.length <= 0){
                 $('#btn-save').prop('disabled', true).hide();
                 $('#btn-save-pending').prop('disabled', true).hide();
                 return;
             }
-            refreshActionButtons();
+            const hasPending = hasAnyPendingSaleItem();
+            $('#btn-save').show().prop('disabled', !canSave() || hasPending);
+            if(isSaleOperation){
+                $('#btn-save-pending').show().prop('disabled', !canSavePending());
+            }else{
+                $('#btn-save-pending').prop('disabled', true).hide();
+            }
         }
 
         function canOpenPicker(){
@@ -848,19 +913,19 @@ add_shortcode('stock_update_form', function($atts){
             const mobile = normalizeMobileInput(saleCustomerMobile);
             const address = String(saleCustomerAddress || '').trim();
             if(!saleMethod){
-                if(showAlert) alert('نحوه فروش را انتخاب کنید.');
+                if(showAlert) showGlobalToast('نحوه فروش را انتخاب کنید.', false);
                 return false;
             }
             if(name.length < 3){
-                if(showAlert) alert('نام و نام خانوادگی را کامل وارد کنید.');
+                if(showAlert) showGlobalToast('نام و نام خانوادگی را کامل وارد کنید.', false);
                 return false;
             }
             if(!/^0\d{10}$/.test(mobile)){
-                if(showAlert) alert('شماره موبایل باید با 0 شروع شود و دقیقاً 11 رقم باشد.');
+                if(showAlert) showGlobalToast('شماره موبایل باید با 0 شروع شود و دقیقاً 11 رقم باشد.', false);
                 return false;
             }
             if(address.length < 8){
-                if(showAlert) alert('آدرس مشتری را کامل وارد کنید.');
+                if(showAlert) showGlobalToast('آدرس مشتری را کامل وارد کنید.', false);
                 return false;
             }
             return true;
@@ -970,7 +1035,11 @@ add_shortcode('stock_update_form', function($atts){
             $('#items-table').show();
             const hasPending = hasAnyPendingSaleItem();
             $('#btn-save').show().prop('disabled', !canSave() || hasPending);
-            $('#btn-save-pending').show().prop('disabled', !canSavePending());
+            if(isSaleOperation){
+                $('#btn-save-pending').show().prop('disabled', !canSavePending());
+            }else{
+                $('#btn-save-pending').prop('disabled', true).hide();
+            }
             const grandTotal = items.reduce((sum, it) => sum + (parseInt(it.qty, 10) || 0), 0);
             $('#items-total-value').text(String(grandTotal));
             $('#items-total-wrap').show();
@@ -1269,7 +1338,7 @@ add_shortcode('stock_update_form', function($atts){
             if (qty > stock){
                 if (showAlert){
                     const name = findLabelById(pid) || ('#'+pid);
-                    alert(`برای "${name}" حداکثر قابل انتخاب ${stock} عدد است (موجودی انبار تولید).`);
+                    showGlobalToast(`برای "${name}" حداکثر قابل انتخاب ${stock} عدد است (موجودی انبار تولید).`, false);
                 }
                 return stock;
             }
@@ -1282,7 +1351,7 @@ add_shortcode('stock_update_form', function($atts){
             if (qty > stock){
                 if (showAlert){
                     const name = findLabelById(pid) || ('#'+pid);
-                    alert(`برای "${name}" حداکثر قابل انتخاب ${stock} عدد است (موجودی انبار مبدا).`);
+                    showGlobalToast(`برای "${name}" حداکثر قابل انتخاب ${stock} عدد است (موجودی انبار مبدا).`, false);
                 }
                 return stock;
             }
@@ -1376,7 +1445,7 @@ add_shortcode('stock_update_form', function($atts){
                 return (+pickerQty[pid] || 0) > 0;
             });
             if (selectedIds.length === 0){
-                alert('هیچ محصولی با تعداد بالاتر از صفر انتخاب نشده است.');
+                showGlobalToast('هیچ محصولی با تعداد بالاتر از صفر انتخاب نشده است.', false);
                 return;
             }
 
@@ -1395,13 +1464,13 @@ add_shortcode('stock_update_form', function($atts){
                     const stock = findProductionStockById(pid);
 
                     if (opType === 'out' && qty > stock){
-                        alert(`مقدار انتخابی برای «${name}» بیشتر از موجودی انبار تولید است.`);
+                        showGlobalToast(`مقدار انتخابی برای «${name}» بیشتر از موجودی انبار تولید است.`, false);
                         return false;
                     }
                     if (opType === 'transfer'){
                         const sourceStock = findTransferSourceStockById(pid);
                         if (qty > sourceStock){
-                            alert(`مقدار انتخابی برای «${name}» بیشتر از موجودی انبار مبدا است.`);
+                            showGlobalToast(`مقدار انتخابی برای «${name}» بیشتر از موجودی انبار مبدا است.`, false);
                             return false;
                         }
                     }
@@ -1434,7 +1503,7 @@ add_shortcode('stock_update_form', function($atts){
                 }
 
                 if (!addedAny){
-                    alert('هیچ محصولی با تعداد بالاتر از صفر انتخاب نشده است.');
+                    showGlobalToast('هیچ محصولی با تعداد بالاتر از صفر انتخاب نشده است.', false);
                     return false;
                 }
 
@@ -1462,7 +1531,7 @@ add_shortcode('stock_update_form', function($atts){
                     }
                     addItemsToTable();
                 }).fail(function(){
-                    alert('به‌روزرسانی موجودی انجام نشد. لطفاً دوباره تلاش کنید.');
+                    showGlobalToast('به‌روزرسانی موجودی انجام نشد. لطفاً دوباره تلاش کنید.', false);
                 }).always(afterDone);
                 return;
             }
@@ -1474,7 +1543,7 @@ add_shortcode('stock_update_form', function($atts){
         $('input[name="op-type"]').on('change', function(){
             if(!activateOpType($(this).val())){
                 $(this).prop('checked', false);
-                alert('شما به نوع عملیات انتخابی دسترسی ندارید.');
+                showGlobalToast('شما به نوع عملیات انتخابی دسترسی ندارید.', false);
                 return false;
             }
         });
@@ -1670,7 +1739,7 @@ add_shortcode('stock_update_form', function($atts){
         });
 
         let submitting = false;
-        function submitOrder(submitMode){
+        function submitOrder(submitMode, skipConfirm){
             if (submitting) return;
             const mode = (submitMode === 'pending_review') ? 'pending_review' : 'final';
             if (mode === 'pending_review') {
@@ -1682,11 +1751,9 @@ add_shortcode('stock_update_form', function($atts){
 
             const submittedProductIds = items.map(function(it){ return parseInt(it.id, 10); }).filter(function(v){ return Number.isFinite(v) && v > 0; });
 
-            if (opType === 'in' || opType === 'out' || opType === 'transfer' || opType === 'return'){
-                const ok = window.confirm(buildSubmitConfirmMessage());
-                if (!ok){
-                    return;
-                }
+            if (!skipConfirm && (opType === 'in' || opType === 'out' || opType === 'transfer' || opType === 'return')){
+                askForConfirmation(buildSubmitConfirmMessage(), function(){ submitOrder(mode, true); }, function(){});
+                return;
             }
 
             submitting = true;
@@ -1772,7 +1839,7 @@ add_shortcode('stock_update_form', function($atts){
                                 html += '<div style="margin-top:8px"><a href="'+wordUrl+'" target="_blank" rel="noopener" style="color:#1d4ed8; font-weight:700">دانلود رسید عملیات (HTML)</a></div>';
                             }
                             $('#save-result').html(html).show();
-                            alert(msg);
+                            showGlobalToast(msg, true);
                             if(shouldReloadForEditPending){
                                 window.location.reload();
                             }
@@ -1792,21 +1859,21 @@ add_shortcode('stock_update_form', function($atts){
                             refreshActionButtons();
                         });
                     }else{
-                        alert((res && res.data && res.data.message) ? res.data.message : 'ثبت ناموفق.');
+                        showGlobalToast((res && res.data && res.data.message) ? res.data.message : 'ثبت ناموفق.', false);
                         submitting = false;
                         $btn.css({opacity: 1, cursor: 'pointer'}).text(originalText);
                         $otherBtn.css({opacity: 1, cursor: 'pointer'});
                         refreshActionButtons();
                     }
                 }catch(e){
-                    alert('پاسخ نامعتبر از سرور.');
+                    showGlobalToast('پاسخ نامعتبر از سرور.', false);
                     submitting = false;
                     $btn.css({opacity: 1, cursor: 'pointer'}).text(originalText);
                     $otherBtn.css({opacity: 1, cursor: 'pointer'});
                     refreshActionButtons();
                 }
             }).fail(function(){
-                alert('خطای ارتباطی هنگام ثبت.');
+                showGlobalToast('خطای ارتباطی هنگام ثبت.', false);
                 submitting = false;
                 $btn.css({opacity: 1, cursor: 'pointer'}).text(originalText);
                 $otherBtn.css({opacity: 1, cursor: 'pointer'});
@@ -1965,13 +2032,44 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         echo '</tr>';
     }
     echo '</tbody></table>';
-    echo '<div id="wc-suf-complete-order-result" style="display:none; margin-top:10px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:10px; background:#f9fafb"></div>';
+    echo '<div id="wc-suf-complete-order-toast" style="display:none; position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:99999; min-width:260px; max-width:min(92vw, 540px); padding:12px 14px; border-radius:12px; border:1px solid transparent; box-shadow:0 10px 24px rgba(15,23,42,.18); font-weight:700">';
+    echo '<div style="display:flex; align-items:center; gap:10px">';
+    echo '<div id="wc-suf-complete-order-toast-text" style="flex:1; text-align:right"></div>';
+    echo '<button type="button" id="wc-suf-complete-order-toast-close" aria-label="بستن پیام" style="border:1px solid currentColor; background:transparent; color:inherit; border-radius:8px; cursor:pointer; font-weight:800; padding:2px 8px; line-height:1.4">✕</button>';
+    echo '</div></div>';
     echo '</div>';
     ?>
     <script>
     jQuery(function($){
         const ajaxurl = "<?php echo esc_js( admin_url('admin-ajax.php') ); ?>";
         const nonce = "<?php echo esc_js( wp_create_nonce('wc_suf_complete_pending_sale') ); ?>";
+        let completeOrderToastTimer = null;
+        function showCompleteOrderToast(message, isSuccess){
+            const bg = isSuccess ? '#ecfdf5' : '#fef2f2';
+            const color = isSuccess ? '#065f46' : '#b91c1c';
+            const borderColor = isSuccess ? '#10b981' : '#fca5a5';
+            if(completeOrderToastTimer){
+                clearTimeout(completeOrderToastTimer);
+                completeOrderToastTimer = null;
+            }
+            $('#wc-suf-complete-order-toast-text').text(message);
+            $('#wc-suf-complete-order-toast')
+                .stop(true, true)
+                .css({background:bg, color:color, borderColor:borderColor})
+                .fadeIn(160);
+            completeOrderToastTimer = setTimeout(function(){
+                $('#wc-suf-complete-order-toast').fadeOut(260);
+                completeOrderToastTimer = null;
+            }, 5000);
+        }
+        $(document).on('click', '#wc-suf-complete-order-toast-close', function(){
+            if(completeOrderToastTimer){
+                clearTimeout(completeOrderToastTimer);
+                completeOrderToastTimer = null;
+            }
+            $('#wc-suf-complete-order-toast').stop(true, true).fadeOut(120);
+        });
+
         $(document).on('click', '.wc-suf-complete-order-btn', function(){
             const $btn = $(this);
             const orderId = parseInt($btn.data('order-id'), 10) || 0;
@@ -1984,16 +2082,12 @@ add_shortcode('wc_suf_my_sale_orders', function(){
             }).done(function(res){
                 const ok = !!(res && res.success);
                 const msg = (res && res.data && res.data.message) ? res.data.message : (ok ? 'انجام شد.' : 'ناموفق بود.');
-                $('#wc-suf-complete-order-result')
-                    .html('<div style="font-weight:700; color:'+(ok ? '#065f46' : '#b91c1c')+'">'+msg+'</div>')
-                    .show();
+                showCompleteOrderToast(msg, ok);
                 if(ok){
                     setTimeout(function(){ window.location.reload(); }, 600);
                 }
             }).fail(function(){
-                $('#wc-suf-complete-order-result')
-                    .html('<div style="font-weight:700; color:#b91c1c">خطای ارتباطی در تکمیل سفارش.</div>')
-                    .show();
+                showCompleteOrderToast('خطای ارتباطی در تکمیل سفارش.', false);
             }).always(function(){
                 $btn.prop('disabled', false).css({opacity:1, cursor:'pointer'}).text('تکمیل سفارش');
             });
