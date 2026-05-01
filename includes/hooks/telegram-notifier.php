@@ -53,6 +53,24 @@ function wc_suf_telegram_money( $amount, $currency ) {
     return trim( preg_replace( '/\s+/u', ' ', html_entity_decode( $text, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) );
 }
 
+function wc_suf_telegram_format_product_name_with_code( $name, $product ) {
+    $name = trim( (string) $name );
+    if ( $name === '' ) {
+        $name = 'محصول';
+    }
+
+    if ( ! ( $product instanceof WC_Product ) ) {
+        return $name;
+    }
+
+    $product_code = trim( (string) $product->get_sku() );
+    if ( $product_code === '' ) {
+        $product_code = (string) $product->get_id();
+    }
+
+    return sprintf( '%s (%s)', $name, $product_code );
+}
+
 function wc_suf_telegram_detect_order_source( WC_Order $order ) {
     $is_yith_pos = false;
     foreach ( [ '_yith_pos_order', '_yith_pos_gateway', '_yith_pos_store', '_yith_pos_register' ] as $meta_key ) {
@@ -154,7 +172,7 @@ function wc_suf_telegram_get_pending_items( WC_Order $order ) {
         }
         $qty = isset( $raw_qty_map[ $product_id ] ) ? (int) $raw_qty_map[ $product_id ] : 0;
         $product = wc_get_product( $product_id );
-        $name = $product ? $product->get_name() : ( '#' . $product_id );
+        $name = $product ? wc_suf_telegram_format_product_name_with_code( $product->get_name(), $product ) : ( '#' . $product_id );
 
         $line_total = isset( $raw_price_map[ $product_id ]['line'] ) ? (float) $raw_price_map[ $product_id ]['line'] : 0.0;
         if ( $line_total <= 0 && isset( $raw_price_map[ $product_id ]['unit'] ) ) {
@@ -221,7 +239,9 @@ function wc_suf_telegram_build_order_message( WC_Order $order ) {
     foreach ( $order->get_items() as $item ) {
         $qty = (int) $item->get_quantity();
         $allocated_total += (float) $item->get_total();
-        $allocated_lines[] = sprintf( '- %s | تعداد: %d', $item->get_name(), $qty );
+        $product = $item->get_product();
+        $product_name = wc_suf_telegram_format_product_name_with_code( $item->get_name(), $product );
+        $allocated_lines[] = sprintf( '- %s | تعداد: %d', $product_name, $qty );
     }
 
     $pending = wc_suf_telegram_get_pending_items( $order );
