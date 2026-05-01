@@ -28,8 +28,11 @@ function wc_suf_validate_sale_method_for_current_user( $raw_method ) {
     if ( ! in_array( $sale_method, $valid_methods, true ) ) {
         return '';
     }
-    if ( 'main_onsite' === $sale_method && wc_suf_current_user_has_role( 'tehsale' ) ) {
-        return '';
+    if ( 'main_onsite' === $sale_method ) {
+        $can_use_main_onsite_sale_method = current_user_can( 'manage_options' ) || wc_suf_current_user_has_role( 'formeditor' );
+        if ( ! $can_use_main_onsite_sale_method ) {
+            return '';
+        }
     }
     return $sale_method;
 }
