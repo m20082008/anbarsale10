@@ -80,6 +80,7 @@ add_shortcode('stock_update_form', function($atts){
     $is_marjoo_only = wc_suf_is_marjoo_only_user();
     $is_sale_user = wc_suf_current_user_has_role( 'sale' );
     $is_tehsale_user = wc_suf_current_user_has_role( 'tehsale' );
+    $can_use_main_onsite_sale_method = current_user_can( 'manage_options' ) || wc_suf_current_user_has_role( 'formeditor' );
     $atts = shortcode_atts(['key' => ''], $atts, 'stock_update_form');
     $current_user = wp_get_current_user();
     $display_name = trim( (string) $current_user->first_name . ' ' . (string) $current_user->last_name );
@@ -318,7 +319,7 @@ add_shortcode('stock_update_form', function($atts){
             <label for="sale-method">نحوه فروش:</label>
             <select id="sale-method">
               <option value="">انتخاب نحوه فروش...</option>
-              <?php if ( ! $is_tehsale_user ) : ?>
+              <?php if ( $can_use_main_onsite_sale_method ) : ?>
               <option value="main_onsite">۱- فروش حضوری انبار اصلی</option>
               <?php endif; ?>
               <option value="tehranpars_onsite">۲- فروش حضوری شعبه تهرانپارس</option>
@@ -423,6 +424,7 @@ add_shortcode('stock_update_form', function($atts){
         const allowedOps = <?php echo wp_json_encode( $allowed_ops ); ?>;
         const isSaleUserRole = <?php echo $is_sale_user ? 'true' : 'false'; ?>;
         const isTehSaleUserRole = <?php echo $is_tehsale_user ? 'true' : 'false'; ?>;
+        const canUseMainOnsiteSaleMethod = <?php echo $can_use_main_onsite_sale_method ? 'true' : 'false'; ?>;
 
         const defaultShortcodeKey = "<?php echo esc_js($atts['key']); ?>";
         const urlParams = new URLSearchParams(window.location.search);
@@ -1636,7 +1638,7 @@ add_shortcode('stock_update_form', function($atts){
 
         syncOpTypeButtonsState();
 
-        if(isTehSaleUserRole){
+        if(!canUseMainOnsiteSaleMethod || isTehSaleUserRole){
             $('#sale-method option[value="main_onsite"]').remove();
         }
         if(isSaleUserRole){
