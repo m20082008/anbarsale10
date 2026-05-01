@@ -58,8 +58,21 @@ function wc_suf_update_pending_order_visible_meta( $order, $breakdown_rows ) {
                 $name = (string) $product->get_name();
             }
         }
+        $product_code = '';
+        if ( $pid > 0 ) {
+            $product = isset( $product ) && $product ? $product : wc_get_product( $pid );
+            if ( $product ) {
+                $product_code = trim( (string) $product->get_sku() );
+                if ( $product_code === '' ) {
+                    $product_code = (string) $product->get_id();
+                }
+            }
+        }
         if ( $name === '' ) {
             $name = 'محصول #' . $pid;
+        }
+        if ( $product_code !== '' ) {
+            $name .= ' (' . $product_code . ')';
         }
         $total_pending += $pending_qty;
         $lines[] = sprintf( '%s | تعداد در انتظار: %d', $name, $pending_qty );
@@ -1241,6 +1254,8 @@ function wc_suf_save_stock_update_handler(){
             }
             $sale_order->update_meta_data( '_wc_suf_pending_qty_total', $pending_qty_total );
             $sale_order->update_meta_data( '_wc_suf_pending_qty_map', wp_json_encode( $pending_qty_map, JSON_UNESCAPED_UNICODE ) );
+            $sale_order->update_meta_data( '_wc_qof_pending_items', wp_json_encode( array_keys( $pending_qty_map ), JSON_UNESCAPED_UNICODE ) );
+            $sale_order->update_meta_data( '_wc_qof_pending_req_qty', wp_json_encode( $pending_qty_map, JSON_UNESCAPED_UNICODE ) );
             wc_suf_update_pending_order_visible_meta( $sale_order, $sale_pending_breakdown );
             $sale_order->calculate_totals();
             if ( $sale_submit_mode === 'pending_review' ) {
@@ -1524,6 +1539,8 @@ function wc_suf_complete_pending_sale_handler(){
     $order->update_meta_data( '_wc_suf_pending_breakdown', wp_json_encode( $updated_breakdown, JSON_UNESCAPED_UNICODE ) );
     $order->update_meta_data( '_wc_suf_pending_qty_total', $pending_qty_total );
     $order->update_meta_data( '_wc_suf_pending_qty_map', wp_json_encode( $pending_qty_map, JSON_UNESCAPED_UNICODE ) );
+    $order->update_meta_data( '_wc_qof_pending_items', wp_json_encode( array_keys( $pending_qty_map ), JSON_UNESCAPED_UNICODE ) );
+    $order->update_meta_data( '_wc_qof_pending_req_qty', wp_json_encode( $pending_qty_map, JSON_UNESCAPED_UNICODE ) );
     wc_suf_update_pending_order_visible_meta( $order, $updated_breakdown );
     $order->calculate_totals();
 

@@ -93,6 +93,47 @@ function wc_suf_telegram_detect_order_source( WC_Order $order ) {
 }
 
 function wc_suf_telegram_get_pending_items( WC_Order $order ) {
+    $breakdown_raw = $order->get_meta( '_wc_suf_pending_breakdown', true );
+    if ( is_string( $breakdown_raw ) && strpos( $breakdown_raw, '[' ) === 0 ) {
+        $breakdown_rows = json_decode( $breakdown_raw, true );
+        if ( is_array( $breakdown_rows ) ) {
+            $lines = [];
+            $total = 0.0;
+            $unit_price_map = [];
+
+            foreach ( $order->get_items() as $item ) {
+                $pid = $item->get_product_id();
+                if ( $pid <= 0 ) {
+                    continue;
+                }
+                $qty = max( 1, (int) $item->get_quantity() );
+                $unit_price_map[ $pid ] = (float) $item->get_total() / $qty;
+            }
+
+            foreach ( $breakdown_rows as $row ) {
+                $pending_qty = max( 0, (int) ( $row['pending_qty'] ?? 0 ) );
+                if ( $pending_qty <= 0 ) {
+                    continue;
+                }
+                $product_id = absint( $row['product_id'] ?? 0 );
+                $product = $product_id > 0 ? wc_get_product( $product_id ) : null;
+                $base_name = trim( (string) ( $row['product_name'] ?? '' ) );
+                if ( $base_name === '' && $product ) {
+                    $base_name = $product->get_name();
+                }
+                $name = wc_suf_telegram_format_product_name_with_code( $base_name, $product );
+
+                $unit_price = isset( $unit_price_map[ $product_id ] ) ? (float) $unit_price_map[ $product_id ] : 0.0;
+                $total += ( $unit_price * $pending_qty );
+                $lines[] = sprintf( '- %s | تعداد: %d', $name, $pending_qty );
+            }
+
+            if ( ! empty( $lines ) ) {
+                return [ 'text' => implode( "\n", $lines ), 'total' => $total ];
+            }
+        }
+    }
+
     $raw_items = $order->get_meta( '_wc_qof_pending_items', true );
     $raw_qty_map = $order->get_meta( '_wc_qof_pending_req_qty', true );
     $raw_price_map = $order->get_meta( '_wc_qof_pending_price_map', true );
