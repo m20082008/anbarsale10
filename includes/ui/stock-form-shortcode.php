@@ -451,7 +451,7 @@ add_shortcode('stock_update_form', function($atts){
                     '<div id="wc-suf-confirm-modal" style="display:none; position:fixed; inset:0; z-index:100000; background:rgba(15,23,42,.35); align-items:center; justify-content:center; padding:16px;">'
                     + '<div style="width:min(92vw,460px); background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:0 18px 48px rgba(15,23,42,.25); padding:16px;">'
                     + '<div id="wc-suf-confirm-modal-text" style="font-weight:700; color:#0f172a; line-height:1.9; margin-bottom:14px; white-space:pre-line;"></div>'
-                    + '<div style="display:flex; justify-content:flex-end; gap:10px;">'
+                    + '<div style="display:flex; justify-content:flex-start; direction:rtl; gap:10px;">'
                     + '<button type="button" id="wc-suf-confirm-ok" style="padding:8px 14px; border:1px solid #2563eb; border-radius:10px; background:#2563eb; color:#fff; font-weight:700; cursor:pointer">بله</button>'
                     + '<button type="button" id="wc-suf-confirm-cancel" style="padding:8px 14px; border:1px solid #94a3b8; border-radius:10px; background:#fff; color:#334155; font-weight:700; cursor:pointer">لغو</button>'
                     + '</div></div></div>'
