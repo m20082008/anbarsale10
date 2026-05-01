@@ -705,6 +705,9 @@ function wc_suf_save_stock_update_handler(){
         if ( '' === $sale_method ) {
             wp_send_json_error(['message'=>'نحوه فروش معتبر نیست.']);
         }
+        if ( $sale_submit_mode === 'pending_review' && in_array( $sale_method, ['main_onsite', 'tehranpars_onsite'], true ) ) {
+            wp_send_json_error(['message'=>'برای نحوه فروش حضوری، ثبت در انتظار مجاز نیست.']);
+        }
         if ( mb_strlen( trim( $sale_customer_name ) ) < 3 ) {
             wp_send_json_error(['message'=>'نام و نام خانوادگی مشتری معتبر نیست.']);
         }

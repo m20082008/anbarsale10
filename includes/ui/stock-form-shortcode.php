@@ -881,6 +881,7 @@ add_shortcode('stock_update_form', function($atts){
         }
         function canSavePending(){
             if(opType !== 'sale' && opType !== 'sale_teh') return false;
+            if(saleMethod === 'main_onsite' || saleMethod === 'tehranpars_onsite') return false;
             return canSave();
         }
         function refreshActionButtons(){
@@ -892,7 +893,7 @@ add_shortcode('stock_update_form', function($atts){
             }
             const hasPending = hasAnyPendingSaleItem();
             $('#btn-save').show().prop('disabled', !canSave() || hasPending);
-            if(isSaleOperation){
+            if(isSaleOperation && canSavePending()){
                 $('#btn-save-pending').show().prop('disabled', !canSavePending());
             }else{
                 $('#btn-save-pending').prop('disabled', true).hide();
@@ -1037,7 +1038,7 @@ add_shortcode('stock_update_form', function($atts){
             $('#items-table').show();
             const hasPending = hasAnyPendingSaleItem();
             $('#btn-save').show().prop('disabled', !canSave() || hasPending);
-            if(isSaleOperation){
+            if(isSaleOperation && canSavePending()){
                 $('#btn-save-pending').show().prop('disabled', !canSavePending());
             }else{
                 $('#btn-save-pending').prop('disabled', true).hide();
