@@ -85,11 +85,11 @@ function wc_suf_telegram_detect_order_source( WC_Order $order ) {
         if ( $branch === '' ) {
             $branch = (string) $order->get_meta( '_yith_pos_store', true );
         }
-        return $branch !== '' ? 'YITH POS - شعبه: ' . $branch : 'YITH POS';
+        return $branch !== '' ? 'شعبه - ' . $branch : 'شعبه';
     }
 
     $is_new_app = (bool) $order->get_meta( '_from_new_app', true ) || (bool) $order->get_meta( '_order_from_app', true );
-    return $is_new_app ? 'نرم افزار جدید' : 'وبسایت';
+    return $is_new_app ? 'نرم افزار' : 'وبسایت';
 }
 
 function wc_suf_telegram_get_pending_items( WC_Order $order ) {
@@ -312,6 +312,7 @@ function wc_suf_telegram_build_order_message( WC_Order $order ) {
 
     $msg = [];
     $msg[] = '✅ سفارش جدید!';
+    $msg[] = '🧭 مرجع سفارش: ' . wc_suf_telegram_detect_order_source( $order );
     $msg[] = '🧾 نحوه فروش: ' . $sales_method;
     $msg[] = '🔢 شماره سفارش: ' . $order->get_order_number();
     $msg[] = '🕒 تاریخ ایجاد سفارش: ' . $created_text;
