@@ -632,6 +632,11 @@ function wc_suf_restore_stock_for_cancelled_order( $order_id ) {
 }
 add_action( 'woocommerce_order_status_cancelled', 'wc_suf_restore_stock_for_cancelled_order', 30 );
 
+
+function wc_suf_get_admin_order_items_action() {
+    return isset( $_REQUEST['action'] ) ? sanitize_key( wp_unslash( $_REQUEST['action'] ) ) : '';
+}
+
 function wc_suf_is_manual_admin_order_edit_request() {
     if ( ! is_admin() ) {
         return false;
@@ -647,11 +652,7 @@ function wc_suf_is_manual_admin_order_edit_request() {
     }
 
     $action = isset( $_REQUEST['action'] ) ? sanitize_key( wp_unslash( $_REQUEST['action'] ) ) : '';
-    if ( $action !== 'woocommerce_save_order_items' ) {
-        return false;
-    }
-
-    if ( ! current_user_can( 'edit_shop_orders' ) ) {
+    if ( $action !== '' && ! in_array( $action, [ 'woocommerce_save_order_items', 'woocommerce_add_order_item', 'woocommerce_remove_order_item' ], true ) ) {
         return false;
     }
 
@@ -794,6 +795,9 @@ function wc_suf_validate_admin_order_item_qty_against_stock( $order_id, $items )
     if ( ! wc_suf_is_manual_admin_order_edit_request() ) {
         return;
     }
+    if ( wc_suf_get_admin_order_items_action() !== 'woocommerce_save_order_items' ) {
+        return;
+    }
 
     $order_id = (int) $order_id;
     if ( $order_id <= 0 ) {
@@ -852,7 +856,10 @@ function wc_suf_capture_order_stock_snapshot( $order ) {
         return [];
     }
 
-    $snapshot = [];
+    $snapshot = [
+        'order_qty_by_product' => [],
+        'stock_qty_by_product' => [],
+    ];
     $items = $order->get_items( 'line_item' );
     foreach ( $items as $item ) {
         if ( ! is_a( $item, 'WC_Order_Item_Product' ) ) {
@@ -874,28 +881,89 @@ function wc_suf_capture_order_stock_snapshot( $order ) {
             continue;
         }
 
-        $stock_qty = $stock_product->get_stock_quantity();
-        if ( $stock_qty === null ) {
-            continue;
+        if ( ! isset( $snapshot['order_qty_by_product'][ $managed_product_id ] ) ) {
+            $snapshot['order_qty_by_product'][ $managed_product_id ] = 0.0;
         }
+        $snapshot['order_qty_by_product'][ $managed_product_id ] += max( 0, (float) $item->get_quantity() );
 
-        $snapshot[ $managed_product_id ] = [
-            'product_id'      => $managed_product_id,
-            'variation_id'    => $stock_product->is_type( 'variation' ) ? (int) $stock_product->get_id() : 0,
-            'product_name'    => wc_suf_full_product_label( $stock_product ),
-            'sku'             => (string) $stock_product->get_sku(),
-            'product_type'    => (string) $stock_product->get_type(),
-            'parent_id'       => (int) $stock_product->get_parent_id(),
-            'attributes_text' => wc_suf_get_product_attributes_text( $stock_product ),
-            'qty'             => (float) $stock_qty,
-        ];
+        $stock_qty = $stock_product->get_stock_quantity();
+        $snapshot['stock_qty_by_product'][ $managed_product_id ] = ( $stock_qty === null ) ? 0.0 : (float) $stock_qty;
     }
 
     return $snapshot;
 }
 
+function wc_suf_parse_admin_order_items_qty_totals_by_product( $items ) {
+    if ( is_string( $items ) ) {
+        parse_str( wp_unslash( $items ), $items );
+    }
+    $items = (array) $items;
+
+    $qty_map = isset( $items['order_item_qty'] ) && is_array( $items['order_item_qty'] )
+        ? $items['order_item_qty']
+        : [];
+    $variation_map = isset( $items['order_item_variation_id'] ) && is_array( $items['order_item_variation_id'] )
+        ? $items['order_item_variation_id']
+        : [];
+    $product_map = isset( $items['order_item_product_id'] ) && is_array( $items['order_item_product_id'] )
+        ? $items['order_item_product_id']
+        : [];
+
+    $totals = [];
+    foreach ( $qty_map as $item_key => $qty_raw ) {
+        $qty = wc_stock_amount( wc_clean( wp_unslash( $qty_raw ) ) );
+        $qty = max( 0, (float) $qty );
+        if ( $qty <= 0 ) {
+            continue;
+        }
+
+        $product_id = 0;
+        if ( isset( $variation_map[ $item_key ] ) ) {
+            $product_id = absint( $variation_map[ $item_key ] );
+        }
+        if ( $product_id <= 0 && isset( $product_map[ $item_key ] ) ) {
+            $product_id = absint( $product_map[ $item_key ] );
+        }
+
+        if ( $product_id <= 0 && absint( $item_key ) > 0 ) {
+            $order_item = WC_Order_Factory::get_order_item( absint( $item_key ) );
+            if ( is_a( $order_item, 'WC_Order_Item_Product' ) ) {
+                $item_product = $order_item->get_product();
+                if ( $item_product ) {
+                    $stock_product = wc_suf_get_stock_product( $item_product );
+                    $product_id = $stock_product ? (int) $stock_product->get_id() : 0;
+                }
+            }
+        }
+
+        if ( $product_id <= 0 ) {
+            continue;
+        }
+
+        $stock_product = wc_suf_get_stock_product( wc_get_product( $product_id ) );
+        if ( ! $stock_product || ! $stock_product->managing_stock() ) {
+            continue;
+        }
+
+        $managed_product_id = (int) $stock_product->get_id();
+        if ( $managed_product_id <= 0 ) {
+            continue;
+        }
+
+        if ( ! isset( $totals[ $managed_product_id ] ) ) {
+            $totals[ $managed_product_id ] = 0.0;
+        }
+        $totals[ $managed_product_id ] += $qty;
+    }
+
+    return $totals;
+}
+
 function wc_suf_track_order_before_save_for_diff( $order_id, $items ) {
     if ( ! wc_suf_is_manual_admin_order_edit_request() ) {
+        return;
+    }
+    if ( wc_suf_get_admin_order_items_action() !== 'woocommerce_save_order_items' ) {
         return;
     }
 
@@ -914,17 +982,41 @@ function wc_suf_track_order_before_save_for_diff( $order_id, $items ) {
     }
 
     // قبل از اعمال تغییرات آیتم‌های سفارش در ادمین، موجودی واقعی محصولات مدیریت‌شونده را ثبت می‌کنیم.
-    $GLOBALS['wc_suf_order_edit_stock_snapshots'][ $order_id ] = wc_suf_capture_order_stock_snapshot( $order );
+    $snapshot = wc_suf_capture_order_stock_snapshot( $order );
+    $snapshot['attempted_after_qty_by_product'] = wc_suf_parse_admin_order_items_qty_totals_by_product( $items );
+
+    // برای محصولاتی که در همین ویرایش به سفارش اضافه می‌شوند (و قبلاً در سفارش نبودند)
+    // موجودی قبل از ذخیره را هم ثبت می‌کنیم تا old_qty دقیق انبار داشته باشیم.
+    if ( ! isset( $snapshot['stock_qty_by_product'] ) || ! is_array( $snapshot['stock_qty_by_product'] ) ) {
+        $snapshot['stock_qty_by_product'] = [];
+    }
+    foreach ( (array) $snapshot['attempted_after_qty_by_product'] as $managed_product_id => $qty ) {
+        $managed_product_id = (int) $managed_product_id;
+        if ( $managed_product_id <= 0 ) {
+            continue;
+        }
+        if ( isset( $snapshot['stock_qty_by_product'][ $managed_product_id ] ) ) {
+            continue;
+        }
+        $stock_product = wc_suf_get_stock_product( wc_get_product( $managed_product_id ) );
+        if ( ! $stock_product || ! $stock_product->managing_stock() ) {
+            continue;
+        }
+        $stock_qty = $stock_product->get_stock_quantity();
+        $snapshot['stock_qty_by_product'][ $managed_product_id ] = ( $stock_qty === null ) ? 0.0 : (float) $stock_qty;
+    }
+
+    $GLOBALS['wc_suf_order_edit_stock_snapshots'][ $order_id ] = $snapshot;
 }
 add_action( 'woocommerce_before_save_order_items', 'wc_suf_track_order_before_save_for_diff', 5, 2 );
 
 function wc_suf_log_order_item_differences_after_save( $order_id, $items ) {
-    if ( ! wc_suf_is_manual_admin_order_edit_request() ) {
+    $order_id = (int) $order_id;
+    if ( $order_id <= 0 ) {
         return;
     }
 
-    $order_id = (int) $order_id;
-    if ( $order_id <= 0 ) {
+    if ( ! wc_suf_is_manual_admin_order_edit_request() ) {
         return;
     }
 
@@ -946,7 +1038,29 @@ function wc_suf_log_order_item_differences_after_save( $order_id, $items ) {
     unset( $GLOBALS['wc_suf_order_edit_stock_snapshots'][ $order_id ] );
     $after = wc_suf_capture_order_stock_snapshot( $order );
 
-    $product_ids = array_unique( array_merge( array_keys( $before ), array_keys( $after ) ) );
+    $before_order_qty = isset( $before['order_qty_by_product'] ) && is_array( $before['order_qty_by_product'] )
+        ? $before['order_qty_by_product']
+        : [];
+    $before_stock_qty = isset( $before['stock_qty_by_product'] ) && is_array( $before['stock_qty_by_product'] )
+        ? $before['stock_qty_by_product']
+        : [];
+    $after_order_qty = isset( $after['order_qty_by_product'] ) && is_array( $after['order_qty_by_product'] )
+        ? $after['order_qty_by_product']
+        : [];
+    if ( isset( $before['attempted_after_qty_by_product'] ) && is_array( $before['attempted_after_qty_by_product'] ) ) {
+        foreach ( $before['attempted_after_qty_by_product'] as $attempted_product_id => $attempted_qty ) {
+            $attempted_product_id = (int) $attempted_product_id;
+            if ( $attempted_product_id <= 0 ) {
+                continue;
+            }
+            $after_order_qty[ $attempted_product_id ] = max( 0, (float) $attempted_qty );
+        }
+    }
+    $after_stock_qty = isset( $after['stock_qty_by_product'] ) && is_array( $after['stock_qty_by_product'] )
+        ? $after['stock_qty_by_product']
+        : [];
+
+    $product_ids = array_unique( array_merge( array_keys( $before_order_qty ), array_keys( $after_order_qty ) ) );
     if ( empty( $product_ids ) ) {
         return;
     }
@@ -979,30 +1093,45 @@ function wc_suf_log_order_item_differences_after_save( $order_id, $items ) {
     $logged_any = false;
 
     foreach ( $product_ids as $product_id ) {
-        $old_row = isset( $before[ $product_id ] ) ? $before[ $product_id ] : null;
-        $new_row = isset( $after[ $product_id ] ) ? $after[ $product_id ] : null;
-
-        $old_qty = $old_row ? (float) $old_row['qty'] : 0.0;
-        $new_qty = $new_row ? (float) $new_row['qty'] : 0.0;
-        $delta   = $new_qty - $old_qty;
-        if ( abs( $delta ) < 0.0001 ) {
+        $product_id = (int) $product_id;
+        if ( $product_id <= 0 ) {
             continue;
         }
 
-        $meta = $new_row ? $new_row : $old_row;
-        if ( ! $meta ) {
+        $before_qty_in_order = isset( $before_order_qty[ $product_id ] ) ? (float) $before_order_qty[ $product_id ] : 0.0;
+        $after_qty_in_order  = isset( $after_order_qty[ $product_id ] ) ? (float) $after_order_qty[ $product_id ] : 0.0;
+        $order_qty_delta     = $after_qty_in_order - $before_qty_in_order;
+        if ( abs( $order_qty_delta ) < 0.0001 ) {
             continue;
         }
 
-        $stock_product = wc_suf_get_stock_product( wc_get_product( (int) $product_id ) );
+        $stock_product = wc_suf_get_stock_product( wc_get_product( $product_id ) );
         if ( ! $stock_product || ! $stock_product->managing_stock() ) {
             continue;
         }
 
-        $direction = ( $delta > 0 ) ? 'increase' : 'decrease';
+        $fallback_stock_qty = (float) $stock_product->get_stock_quantity();
+        $old_qty = isset( $before_stock_qty[ $product_id ] ) ? (float) $before_stock_qty[ $product_id ] : $fallback_stock_qty;
+        $new_qty = isset( $after_stock_qty[ $product_id ] ) ? (float) $after_stock_qty[ $product_id ] : $fallback_stock_qty;
+        $change_qty = $new_qty - $old_qty;
+        if ( abs( $change_qty ) < 0.0001 ) {
+            // اگر موجودی از اسنپ‌شات‌ها قابل تشخیص نبود، از تغییر اقلام سفارش برای محاسبه استفاده می‌کنیم.
+            $change_qty = -1 * $order_qty_delta;
+            $old_qty = $new_qty - $change_qty;
+        }
+        $direction = ( $change_qty > 0 ) ? 'increase' : 'decrease';
+        $item_change_label = 'ویرایش تعداد';
+        if ( $before_qty_in_order <= 0 && $after_qty_in_order > 0 ) {
+            $item_change_label = 'افزودن محصول به سفارش';
+        } elseif ( $before_qty_in_order > 0 && $after_qty_in_order <= 0 ) {
+            $item_change_label = 'حذف محصول از سفارش';
+        }
         $purpose = sprintf(
-            'ویرایش سفارش #%s | %s موجودی اصلی ووکامرس | %s → %s',
+            'ویرایش سفارش #%s | %s | اقلام سفارش: %s → %s | %s موجودی انبار اصلی: %s → %s',
             $order_number,
+            $item_change_label,
+            wc_format_decimal( $before_qty_in_order, 4 ),
+            wc_format_decimal( $after_qty_in_order, 4 ),
             ( $direction === 'increase' ? 'افزایش' : 'کاهش' ),
             wc_format_decimal( $old_qty, 4 ),
             wc_format_decimal( $new_qty, 4 )
@@ -1014,14 +1143,14 @@ function wc_suf_log_order_item_differences_after_save( $order_id, $items ) {
                 'batch_code'           => $batch_code,
                 'operation'            => 'sale_edit',
                 'destination'          => 'main',
-                'product_id'           => (int) $meta['product_id'],
-                'product_name'         => (string) $meta['product_name'],
-                'sku'                  => (string) $meta['sku'],
-                'product_type'         => (string) $meta['product_type'],
-                'parent_id'            => (int) $meta['parent_id'],
-                'attributes_text'      => (string) $meta['attributes_text'],
+                'product_id'           => (int) $stock_product->get_id(),
+                'product_name'         => wc_suf_full_product_label( $stock_product ),
+                'sku'                  => (string) $stock_product->get_sku(),
+                'product_type'         => (string) $stock_product->get_type(),
+                'parent_id'            => (int) $stock_product->get_parent_id(),
+                'attributes_text'      => wc_suf_get_product_attributes_text( $stock_product ),
                 'old_qty'              => $old_qty,
-                'change_qty'           => $delta,
+                'change_qty'           => $change_qty,
                 'new_qty'              => $new_qty,
                 'destination_old_qty'  => $old_qty,
                 'destination_new_qty'  => $new_qty,
@@ -1041,10 +1170,10 @@ function wc_suf_log_order_item_differences_after_save( $order_id, $items ) {
                 'op_type'      => 'sale_edit',
                 'purpose'      => $purpose,
                 'print_label'  => 0,
-                'product_id'   => (int) $meta['product_id'],
-                'product_name' => (string) $meta['product_name'],
+                'product_id'   => (int) $stock_product->get_id(),
+                'product_name' => wc_suf_full_product_label( $stock_product ),
                 'old_qty'      => $old_qty,
-                'added_qty'    => $delta,
+                'added_qty'    => $change_qty,
                 'new_qty'      => $new_qty,
                 'user_id'      => $user_id > 0 ? $user_id : null,
                 'user_login'   => $user_display,
