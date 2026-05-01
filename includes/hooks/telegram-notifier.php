@@ -107,7 +107,11 @@ function wc_suf_telegram_get_pending_items( WC_Order $order ) {
                     continue;
                 }
                 $qty = max( 1, (int) $item->get_quantity() );
-                $unit_price_map[ $pid ] = (float) $item->get_total() / $qty;
+                $line_subtotal = (float) $item->get_subtotal();
+                if ( $line_subtotal <= 0 ) {
+                    $line_subtotal = (float) $item->get_total();
+                }
+                $unit_price_map[ $pid ] = $line_subtotal / $qty;
             }
 
             foreach ( $breakdown_rows as $row ) {
@@ -124,6 +128,9 @@ function wc_suf_telegram_get_pending_items( WC_Order $order ) {
                 $name = wc_suf_telegram_format_product_name_with_code( $base_name, $product );
 
                 $unit_price = isset( $unit_price_map[ $product_id ] ) ? (float) $unit_price_map[ $product_id ] : 0.0;
+                if ( $unit_price <= 0 && $product ) {
+                    $unit_price = (float) $product->get_price();
+                }
                 $total += ( $unit_price * $pending_qty );
                 $lines[] = sprintf( '- %s | تعداد: %d', $name, $pending_qty );
             }
