@@ -92,6 +92,34 @@ function wc_suf_telegram_detect_order_source( WC_Order $order ) {
     return $is_new_app ? 'نرم افزار' : 'وبسایت';
 }
 
+function wc_suf_telegram_get_order_seller_username( WC_Order $order ) {
+    $seller = trim( (string) $order->get_meta( '_wc_suf_seller_name', true ) );
+    if ( $seller === '' ) {
+        $seller = trim( (string) $order->get_meta( 'فروشنده', true ) );
+    }
+    if ( $seller !== '' ) {
+        return $seller;
+    }
+
+    $customer_id = (int) $order->get_customer_id();
+    if ( $customer_id > 0 ) {
+        $customer = get_user_by( 'id', $customer_id );
+        if ( $customer && ! empty( $customer->user_login ) ) {
+            return (string) $customer->user_login;
+        }
+    }
+
+    $author_id = (int) get_post_field( 'post_author', $order->get_id() );
+    if ( $author_id > 0 ) {
+        $author = get_user_by( 'id', $author_id );
+        if ( $author && ! empty( $author->user_login ) ) {
+            return (string) $author->user_login;
+        }
+    }
+
+    return 'نامشخص';
+}
+
 function wc_suf_telegram_get_pending_items( WC_Order $order ) {
     $breakdown_raw = $order->get_meta( '_wc_suf_pending_breakdown', true );
     if ( is_string( $breakdown_raw ) && strpos( $breakdown_raw, '[' ) === 0 ) {
@@ -314,6 +342,7 @@ function wc_suf_telegram_build_order_message( WC_Order $order ) {
     $msg[] = '✅ سفارش جدید!';
     $msg[] = '🧭 مرجع سفارش: ' . wc_suf_telegram_detect_order_source( $order );
     $msg[] = '🧾 نحوه فروش: ' . $sales_method;
+    $msg[] = '🧑‍💼 فروشنده: ' . wc_suf_telegram_get_order_seller_username( $order );
     $msg[] = '🔢 شماره سفارش: ' . $order->get_order_number();
     $msg[] = '🕒 تاریخ ایجاد سفارش: ' . $created_text;
     $msg[] = '👤 نام مشتری: ' . $customer_name;
