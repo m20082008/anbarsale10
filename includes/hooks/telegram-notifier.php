@@ -107,6 +107,41 @@ function wc_suf_telegram_get_pending_items( WC_Order $order ) {
         $raw_price_map = [];
     }
     if ( ! is_array( $raw_items ) ) {
+        $custom_pending = $order->get_meta( 'اقلام در انتظار', true );
+        if ( is_string( $custom_pending ) && $custom_pending !== '' ) {
+            $decoded_custom = json_decode( $custom_pending, true );
+            if ( is_array( $decoded_custom ) ) {
+                $custom_pending = $decoded_custom;
+            }
+        }
+
+        if ( is_array( $custom_pending ) ) {
+            $lines = [];
+            foreach ( $custom_pending as $key => $value ) {
+                if ( is_array( $value ) ) {
+                    $name = isset( $value['name'] ) ? trim( (string) $value['name'] ) : '';
+                    $qty = isset( $value['qty'] ) ? (int) $value['qty'] : ( isset( $value['quantity'] ) ? (int) $value['quantity'] : 0 );
+                    if ( $name === '' ) {
+                        $name = is_string( $key ) ? $key : 'آیتم در انتظار';
+                    }
+                    $lines[] = sprintf( '- %s | تعداد: %d', $name, max( 0, $qty ) );
+                    continue;
+                }
+
+                if ( is_string( $key ) ) {
+                    $lines[] = sprintf( '- %s | تعداد: %d', $key, max( 0, (int) $value ) );
+                } elseif ( is_string( $value ) && trim( $value ) !== '' ) {
+                    $lines[] = '- ' . trim( $value );
+                }
+            }
+
+            if ( ! empty( $lines ) ) {
+                return [ 'text' => implode( "\n", $lines ), 'total' => 0.0 ];
+            }
+        } elseif ( is_string( $custom_pending ) && trim( $custom_pending ) !== '' ) {
+            return [ 'text' => trim( $custom_pending ), 'total' => 0.0 ];
+        }
+
         return [ 'text' => 'ندارد', 'total' => 0.0 ];
     }
 
@@ -138,15 +173,9 @@ function wc_suf_telegram_get_pending_items( WC_Order $order ) {
 }
 
 function wc_suf_telegram_build_order_message( WC_Order $order ) {
-    $sales_method = (string) $order->get_meta( '_sales_method', true );
+    $sales_method = (string) $order->get_meta( 'sale_method', true );
     if ( $sales_method === '' ) {
-        $sales_method = (string) $order->get_meta( '_wc_suf_sale_type', true );
-    }
-    if ( $sales_method === '' ) {
-        $sales_method = (string) $order->get_payment_method_title();
-    }
-    if ( $sales_method === '' ) {
-        $sales_method = wc_suf_telegram_detect_order_source( $order );
+        $sales_method = (string) $order->get_meta( '_sales_method', true );
     }
     if ( $sales_method === '' ) {
         $sales_method = 'نامشخص';
