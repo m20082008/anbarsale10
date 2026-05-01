@@ -1245,6 +1245,8 @@ function wc_suf_save_stock_update_handler(){
             $sale_order->calculate_totals();
             if ( $sale_submit_mode === 'pending_review' ) {
                 $sale_order->set_status( 'pendingreview', 'ثبت سفارش در وضعیت در انتظار از فرم فروش.' );
+            } elseif ( $sale_method === 'main_onsite' ) {
+                $sale_order->set_status( 'completed', 'ثبت سفارش حضوری انبار اصلی از فرم عملیات فروش و تکمیل مستقیم سفارش.' );
             } else {
                 $sale_order->set_status( 'processing', 'ثبت سفارش از فرم عملیات فروش انبار تولید.' );
             }
