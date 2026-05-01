@@ -273,13 +273,22 @@ function wc_suf_render_settings_page() {
     if ( isset($_POST['wc_suf_save_settings']) ) {
         check_admin_referer( 'wc_suf_save_settings' );
         $minutes = isset($_POST['wc_suf_sale_hold_minutes']) ? absint($_POST['wc_suf_sale_hold_minutes']) : 30;
+        $telegram_bot_token = isset( $_POST['wc_suf_telegram_bot_token'] ) ? sanitize_text_field( wp_unslash( $_POST['wc_suf_telegram_bot_token'] ) ) : '';
+        $telegram_chat_id = isset( $_POST['wc_suf_telegram_chat_id'] ) ? sanitize_text_field( wp_unslash( $_POST['wc_suf_telegram_chat_id'] ) ) : '';
         update_option( 'wc_suf_sale_hold_minutes', max( 1, $minutes ) );
+        update_option( 'wc_suf_telegram_bot_token', $telegram_bot_token );
+        update_option( 'wc_suf_telegram_chat_id', $telegram_chat_id );
         echo '<div class="notice notice-success"><p>تنظیمات ذخیره شد.</p></div>';
     }
     $minutes = wc_suf_get_sale_hold_minutes();
+    $telegram_bot_token = (string) get_option( 'wc_suf_telegram_bot_token', '' );
+    $telegram_chat_id = (string) get_option( 'wc_suf_telegram_chat_id', '' );
     echo '<div class="wrap" dir="rtl"><h1>تنظیمات</h1><form method="post">';
     wp_nonce_field( 'wc_suf_save_settings' );
     echo '<table class="form-table"><tr><th scope="row">زمان هولد کردن سفارش فروش (دقیقه)</th><td><input type="number" min="1" name="wc_suf_sale_hold_minutes" value="'.esc_attr($minutes).'" class="small-text"></td></tr></table>';
+    echo '<h2>تنظیمات ربات تلگرام</h2>';
+    echo '<table class="form-table"><tr><th scope="row">توکن ربات</th><td><input type="text" name="wc_suf_telegram_bot_token" value="'.esc_attr($telegram_bot_token).'" class="regular-text" dir="ltr"></td></tr>';
+    echo '<tr><th scope="row">Chat ID</th><td><input type="text" name="wc_suf_telegram_chat_id" value="'.esc_attr($telegram_chat_id).'" class="regular-text" dir="ltr"></td></tr></table>';
     submit_button( 'ذخیره تنظیمات', 'primary', 'wc_suf_save_settings' );
     echo '</form></div>';
 }
