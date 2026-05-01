@@ -74,7 +74,37 @@ function wc_suf_telegram_detect_order_source( WC_Order $order ) {
     return $is_new_app ? 'نرم افزار جدید' : 'وبسایت';
 }
 
+
+function wc_suf_telegram_product_label( $product_id, $fallback_name = '' ) {
+    $product_id = absint( $product_id );
+    $product = $product_id ? wc_get_product( $product_id ) : null;
+
+    $name = $fallback_name !== '' ? $fallback_name : ( $product ? $product->get_name() : ( $product_id ? ( '#' . $product_id ) : 'آیتم در انتظار' ) );
+    $sku = $product ? trim( (string) $product->get_sku() ) : '';
+
+    return $sku !== '' ? sprintf( '%s (%s)', $name, $sku ) : $name;
+}
+
+function wc_suf_telegram_build_order_unit_price_map( WC_Order $order ) {
+    $unit_price_map = [];
+
+    foreach ( $order->get_items() as $item ) {
+        $product_id = absint( $item->get_product_id() );
+        $qty = (int) $item->get_quantity();
+        if ( ! $product_id || $qty <= 0 ) {
+            continue;
+        }
+
+        $line_total = (float) $item->get_total();
+        $line_tax = (float) $item->get_total_tax();
+        $unit_price_map[ $product_id ] = ( $line_total + $line_tax ) / $qty;
+    }
+
+    return $unit_price_map;
+}
+
 function wc_suf_telegram_get_pending_items( WC_Order $order ) {
+    $order_unit_prices = wc_suf_telegram_build_order_unit_price_map( $order );
     $raw_items = $order->get_meta( '_wc_qof_pending_items', true );
     $raw_qty_map = $order->get_meta( '_wc_qof_pending_req_qty', true );
     $raw_price_map = $order->get_meta( '_wc_qof_pending_price_map', true );
@@ -153,12 +183,14 @@ function wc_suf_telegram_get_pending_items( WC_Order $order ) {
             continue;
         }
         $qty = isset( $raw_qty_map[ $product_id ] ) ? (int) $raw_qty_map[ $product_id ] : 0;
-        $product = wc_get_product( $product_id );
-        $name = $product ? $product->get_name() : ( '#' . $product_id );
+        $name = wc_suf_telegram_product_label( $product_id );
 
         $line_total = isset( $raw_price_map[ $product_id ]['line'] ) ? (float) $raw_price_map[ $product_id ]['line'] : 0.0;
         if ( $line_total <= 0 && isset( $raw_price_map[ $product_id ]['unit'] ) ) {
             $line_total = (float) $raw_price_map[ $product_id ]['unit'] * $qty;
+        }
+        if ( $line_total <= 0 && isset( $order_unit_prices[ $product_id ] ) ) {
+            $line_total = (float) $order_unit_prices[ $product_id ] * $qty;
         }
 
         $total += $line_total;
@@ -221,7 +253,8 @@ function wc_suf_telegram_build_order_message( WC_Order $order ) {
     foreach ( $order->get_items() as $item ) {
         $qty = (int) $item->get_quantity();
         $allocated_total += (float) $item->get_total();
-        $allocated_lines[] = sprintf( '- %s | تعداد: %d', $item->get_name(), $qty );
+        $product_id = absint( $item->get_product_id() );
+        $allocated_lines[] = sprintf( '- %s | تعداد: %d', wc_suf_telegram_product_label( $product_id, $item->get_name() ), $qty );
     }
 
     $pending = wc_suf_telegram_get_pending_items( $order );
