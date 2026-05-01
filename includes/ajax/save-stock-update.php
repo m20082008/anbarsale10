@@ -28,8 +28,11 @@ function wc_suf_validate_sale_method_for_current_user( $raw_method ) {
     if ( ! in_array( $sale_method, $valid_methods, true ) ) {
         return '';
     }
-    if ( 'main_onsite' === $sale_method && wc_suf_current_user_has_role( 'tehsale' ) ) {
-        return '';
+    if ( 'main_onsite' === $sale_method ) {
+        $can_use_main_onsite_sale_method = current_user_can( 'manage_options' ) || wc_suf_current_user_has_role( 'formeditor' );
+        if ( ! $can_use_main_onsite_sale_method ) {
+            return '';
+        }
     }
     return $sale_method;
 }
@@ -701,6 +704,9 @@ function wc_suf_save_stock_update_handler(){
         $sale_method = wc_suf_validate_sale_method_for_current_user( $sale_method_raw );
         if ( '' === $sale_method ) {
             wp_send_json_error(['message'=>'نحوه فروش معتبر نیست.']);
+        }
+        if ( $sale_submit_mode === 'pending_review' && in_array( $sale_method, ['main_onsite', 'tehranpars_onsite'], true ) ) {
+            wp_send_json_error(['message'=>'برای نحوه فروش حضوری، ثبت در انتظار مجاز نیست.']);
         }
         if ( mb_strlen( trim( $sale_customer_name ) ) < 3 ) {
             wp_send_json_error(['message'=>'نام و نام خانوادگی مشتری معتبر نیست.']);
