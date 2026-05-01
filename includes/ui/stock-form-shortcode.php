@@ -1924,6 +1924,20 @@ add_shortcode('wc_suf_my_sale_orders', function(){
 
     ob_start();
     echo '<div dir="rtl" style="display:grid; gap:12px">';
+    echo '<style>
+    .wc-suf-order-modal{display:none;position:fixed;inset:0;background:rgba(15,23,42,.52);z-index:99998;padding:16px;align-items:center;justify-content:center}
+    .wc-suf-order-modal.is-open{display:flex}
+    .wc-suf-order-modal-card{width:min(940px,96vw);max-height:88vh;overflow:hidden;background:#fff;border-radius:14px;box-shadow:0 20px 40px rgba(15,23,42,.28);display:flex;flex-direction:column}
+    .wc-suf-order-modal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid #e5e7eb;background:#f8fafc}
+    .wc-suf-order-modal-title{font-weight:800;color:#0f172a}
+    .wc-suf-order-modal-close{border:1px solid #ef4444;background:#ef4444;color:#fff;border-radius:10px;padding:6px 10px;cursor:pointer;font-weight:800}
+    .wc-suf-order-modal-body{padding:14px;overflow:auto;display:grid;gap:12px}
+    .wc-suf-order-group{border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}
+    .wc-suf-order-group h4{margin:0;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb}
+    .wc-suf-order-group table{width:100%;border-collapse:collapse;font-size:13px}
+    .wc-suf-order-group th,.wc-suf-order-group td{padding:8px;border:1px solid #e5e7eb;text-align:right}
+    .wc-suf-order-customer-meta{font-size:11px;color:#64748b;display:grid;gap:4px;padding:8px 10px;border:1px dashed #cbd5e1;border-radius:10px;background:#f8fafc}
+    </style>';
     $pending_report_url = wp_nonce_url(
         admin_url( 'admin-ajax.php?action=wc_suf_pending_products_report' ),
         'wc_suf_pending_products_report'
@@ -1998,11 +2012,35 @@ add_shortcode('wc_suf_my_sale_orders', function(){
 
         echo '<tr>';
         echo '<td style="padding:8px; border:1px solid #e5e7eb">';
-        if ( $can_edit_order ) {
-            echo '<a href="'.esc_url( $edit_url ).'" style="color:#1d4ed8; font-weight:700; text-decoration:none">#'.esc_html( $order->get_order_number() ).'</a>';
-        } else {
-            echo '#'.esc_html( $order->get_order_number() );
+        $registered_rows = [];
+        foreach ( $order->get_items('line_item') as $item ) {
+            $item_product_id = (int) $item->get_variation_id();
+            if ( $item_product_id <= 0 ) {
+                $item_product_id = (int) $item->get_product_id();
+            }
+            $item_product = $item_product_id > 0 ? wc_get_product( $item_product_id ) : null;
+            $item_product_code = '';
+            if ( $item_product && is_a( $item_product, 'WC_Product' ) ) {
+                $item_product_code = (string) $item_product->get_sku();
+            }
+            if ( $item_product_code === '' && $item_product_id > 0 ) {
+                $item_product_code = (string) $item_product_id;
+            }
+            $registered_rows[] = [
+                'name' => (string) $item->get_name(),
+                'product_code' => $item_product_code,
+                'qty' => max( 0, (float) $item->get_quantity() ),
+            ];
         }
+        $detail_payload = [
+            'order_number' => (string) $order->get_order_number(),
+            'customer_name' => (string) ( $order->get_meta('_wc_suf_sale_customer_name', true ) ?: $order->get_formatted_billing_full_name() ),
+            'customer_mobile' => (string) ( $order->get_meta('_wc_suf_sale_customer_mobile', true ) ?: $order->get_billing_phone() ),
+            'customer_address' => (string) ( $order->get_meta('_wc_suf_sale_customer_address', true ) ?: $order->get_billing_address_1() ),
+            'registered' => $registered_rows,
+            'pending' => is_array($pending_rows) ? array_values($pending_rows) : [],
+        ];
+        echo '<button type="button" class="wc-suf-order-detail-btn" data-order-detail=\''.esc_attr( wp_json_encode( $detail_payload, JSON_UNESCAPED_UNICODE ) ).'\' style="border:none; background:none; color:#1d4ed8; font-weight:700; text-decoration:none; cursor:pointer; padding:0">#'.esc_html( $order->get_order_number() ).'</button>';
         echo '</td>';
         echo '<td style="padding:8px; border:1px solid #e5e7eb">'.esc_html( $order->get_date_created() ? $order->get_date_created()->date_i18n('Y/m/d H:i') : '-' ).'</td>';
         echo '<td style="padding:8px; border:1px solid #e5e7eb">'.esc_html( wc_get_order_status_name( $order->get_status() ) ).'</td>';
@@ -2037,6 +2075,11 @@ add_shortcode('wc_suf_my_sale_orders', function(){
     echo '<div id="wc-suf-complete-order-toast-text" style="flex:1; text-align:right"></div>';
     echo '<button type="button" id="wc-suf-complete-order-toast-close" aria-label="بستن پیام" style="border:1px solid currentColor; background:transparent; color:inherit; border-radius:8px; cursor:pointer; font-weight:800; padding:2px 8px; line-height:1.4">✕</button>';
     echo '</div></div>';
+    echo '<div id="wc-suf-order-detail-modal" class="wc-suf-order-modal" aria-hidden="true">';
+    echo '<div class="wc-suf-order-modal-card">';
+    echo '<div class="wc-suf-order-modal-head"><div id="wc-suf-order-detail-title" class="wc-suf-order-modal-title">جزئیات سفارش</div><button type="button" id="wc-suf-order-detail-close" class="wc-suf-order-modal-close">بستن</button></div>';
+    echo '<div id="wc-suf-order-detail-body" class="wc-suf-order-modal-body"></div>';
+    echo '</div></div>';
     echo '</div>';
     ?>
     <script>
@@ -2068,6 +2111,55 @@ add_shortcode('wc_suf_my_sale_orders', function(){
                 completeOrderToastTimer = null;
             }
             $('#wc-suf-complete-order-toast').stop(true, true).fadeOut(120);
+        });
+        function escHtml(input){
+            return String(input || '').replace(/[&<>"']/g, function(ch){
+                return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch] || ch);
+            });
+        }
+        function renderOrderGroup(title, rows, qtyKey){
+            if(!Array.isArray(rows) || !rows.length){
+                return '<div class="wc-suf-order-group"><h4>'+escHtml(title)+'</h4><div style="padding:10px 12px;color:#64748b">موردی ثبت نشده است.</div></div>';
+            }
+            let html = '<div class="wc-suf-order-group"><h4>'+escHtml(title)+'</h4><table><thead><tr><th>محصول</th><th style="width:120px">تعداد</th></tr></thead><tbody>';
+            rows.forEach(function(row){
+                const qty = parseFloat(row && row[qtyKey] != null ? row[qtyKey] : row && row.qty != null ? row.qty : 0) || 0;
+                const name = row && (row.name || row.product_name || row.title) ? (row.name || row.product_name || row.title) : '—';
+                const code = row && (row.product_code || row.sku || row.product_id || row.id) ? (row.product_code || row.sku || row.product_id || row.id) : '';
+                const label = code !== '' ? (String(name) + ' (' + String(code) + ')') : String(name);
+                html += '<tr><td>'+escHtml(label)+'</td><td style="text-align:center">'+escHtml(qty)+'</td></tr>';
+            });
+            html += '</tbody></table></div>';
+            return html;
+        }
+        function renderCustomerMeta(payload){
+            const customerName = payload && payload.customer_name ? payload.customer_name : '—';
+            const customerMobile = payload && payload.customer_mobile ? payload.customer_mobile : '—';
+            const customerAddress = payload && payload.customer_address ? payload.customer_address : '—';
+            return '<div class="wc-suf-order-customer-meta">'
+                + '<div><strong>نام مشتری:</strong> ' + escHtml(customerName) + '</div>'
+                + '<div><strong>شماره همراه:</strong> ' + escHtml(customerMobile) + '</div>'
+                + '<div><strong>آدرس:</strong> ' + escHtml(customerAddress) + '</div>'
+                + '</div>';
+        }
+        $(document).on('click', '.wc-suf-order-detail-btn', function(){
+            let payload = null;
+            try{ payload = JSON.parse(String($(this).attr('data-order-detail') || '{}')); }catch(e){ payload = null; }
+            if(!payload){ return; }
+            $('#wc-suf-order-detail-title').text('جزئیات سفارش #' + String(payload.order_number || ''));
+            const bodyHtml = renderCustomerMeta(payload)
+                + renderOrderGroup('محصولات ثبت‌شده', payload.registered || [], 'qty')
+                + renderOrderGroup('محصولات در انتظار', payload.pending || [], 'pending_qty');
+            $('#wc-suf-order-detail-body').html(bodyHtml);
+            $('#wc-suf-order-detail-modal').addClass('is-open').attr('aria-hidden', 'false');
+        });
+        $(document).on('click', '#wc-suf-order-detail-close', function(){
+            $('#wc-suf-order-detail-modal').removeClass('is-open').attr('aria-hidden', 'true');
+        });
+        $(document).on('click', '#wc-suf-order-detail-modal', function(e){
+            if(e.target === this){
+                $('#wc-suf-order-detail-modal').removeClass('is-open').attr('aria-hidden', 'true');
+            }
         });
 
         $(document).on('click', '.wc-suf-complete-order-btn', function(){
