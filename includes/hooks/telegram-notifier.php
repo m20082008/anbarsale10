@@ -88,6 +88,24 @@ function wc_suf_telegram_get_pending_items( WC_Order $order ) {
     if ( is_numeric( $raw_items ) ) {
         $raw_items = [ (int) $raw_items ];
     }
+    if ( is_string( $raw_qty_map ) && strpos( $raw_qty_map, '{' ) === 0 ) {
+        $decoded_qty = json_decode( $raw_qty_map, true );
+        if ( is_array( $decoded_qty ) ) {
+            $raw_qty_map = $decoded_qty;
+        }
+    }
+    if ( is_string( $raw_price_map ) && strpos( $raw_price_map, '{' ) === 0 ) {
+        $decoded_price = json_decode( $raw_price_map, true );
+        if ( is_array( $decoded_price ) ) {
+            $raw_price_map = $decoded_price;
+        }
+    }
+    if ( ! is_array( $raw_qty_map ) ) {
+        $raw_qty_map = [];
+    }
+    if ( ! is_array( $raw_price_map ) ) {
+        $raw_price_map = [];
+    }
     if ( ! is_array( $raw_items ) ) {
         return [ 'text' => 'ندارد', 'total' => 0.0 ];
     }
@@ -120,10 +138,15 @@ function wc_suf_telegram_get_pending_items( WC_Order $order ) {
 }
 
 function wc_suf_telegram_build_order_message( WC_Order $order ) {
-    $source = wc_suf_telegram_detect_order_source( $order );
     $sales_method = (string) $order->get_meta( '_sales_method', true );
     if ( $sales_method === '' ) {
+        $sales_method = (string) $order->get_meta( '_wc_suf_sale_type', true );
+    }
+    if ( $sales_method === '' ) {
         $sales_method = (string) $order->get_payment_method_title();
+    }
+    if ( $sales_method === '' ) {
+        $sales_method = wc_suf_telegram_detect_order_source( $order );
     }
     if ( $sales_method === '' ) {
         $sales_method = 'نامشخص';
@@ -142,8 +165,24 @@ function wc_suf_telegram_build_order_message( WC_Order $order ) {
         $mobile = 'نامشخص';
     }
 
-    $address = trim( (string) ( $order->get_formatted_billing_address() ?: $order->get_formatted_shipping_address() ) );
-    $address = wp_strip_all_tags( str_replace( [ '<br/>', '<br>' ], ' - ', $address ) );
+    $address_parts = [
+        $order->get_billing_address_1(),
+        $order->get_billing_address_2(),
+        $order->get_billing_city(),
+        $order->get_billing_state(),
+    ];
+    $address_parts = array_filter( array_map( 'trim', $address_parts ) );
+    $address = implode( ' - ', $address_parts );
+    if ( $address === '' ) {
+        $shipping_parts = [
+            $order->get_shipping_address_1(),
+            $order->get_shipping_address_2(),
+            $order->get_shipping_city(),
+            $order->get_shipping_state(),
+        ];
+        $shipping_parts = array_filter( array_map( 'trim', $shipping_parts ) );
+        $address = implode( ' - ', $shipping_parts );
+    }
     if ( $address === '' ) {
         $address = 'نامشخص';
     }
@@ -162,18 +201,17 @@ function wc_suf_telegram_build_order_message( WC_Order $order ) {
     $grand_total = $allocated_total + $pending_total;
 
     $msg = [];
-    $msg[] = '📦 گزارش سفارش';
-    $msg[] = '1) منبع سفارش: ' . $source;
-    $msg[] = '2) نحوه فروش: ' . $sales_method;
-    $msg[] = '3) شماره سفارش: ' . $order->get_order_number();
-    $msg[] = '4) تاریخ ایجاد سفارش: ' . $created_text;
-    $msg[] = '5) نام مشتری: ' . $customer_name;
-    $msg[] = '6) شماره موبایل: ' . $mobile;
-    $msg[] = '7) آدرس: ' . $address;
-    $msg[] = "8) اقلام سفارش:\nتخصیص‌شده:\n" . ( $allocated_lines ? implode( "\n", $allocated_lines ) : 'ندارد' ) . "\n\nدر انتظار:\n" . $pending['text'];
-    $msg[] = '9) مبلغ کل اقلام سفارش داده شده (تخصیص از انبار): ' . wc_suf_telegram_money( $allocated_total, $currency );
-    $msg[] = '10) مبلغ کل سفارش های در انتظار: ' . wc_suf_telegram_money( $pending_total, $currency );
-    $msg[] = '11) جمع مبلغ کل: ' . wc_suf_telegram_money( $grand_total, $currency );
+    $msg[] = '✅ سفارش جدید!';
+    $msg[] = '🧾 نحوه فروش: ' . $sales_method;
+    $msg[] = '🔢 شماره سفارش: ' . $order->get_order_number();
+    $msg[] = '🕒 تاریخ ایجاد سفارش: ' . $created_text;
+    $msg[] = '👤 نام مشتری: ' . $customer_name;
+    $msg[] = '📞 شماره موبایل: ' . $mobile;
+    $msg[] = '📍 آدرس: ' . $address;
+    $msg[] = "📦 اقلام سفارش:\n✅ تخصیص‌شده:\n" . ( $allocated_lines ? implode( "\n", $allocated_lines ) : 'ندارد' ) . "\n\n⏳ در انتظار:\n" . $pending['text'];
+    $msg[] = '💵 مبلغ کل اقلام سفارش داده شده (تخصیص از انبار): ' . wc_suf_telegram_money( $allocated_total, $currency );
+    $msg[] = '⌛ مبلغ کل سفارش های در انتظار: ' . wc_suf_telegram_money( $pending_total, $currency );
+    $msg[] = '🧮 جمع مبلغ کل: ' . wc_suf_telegram_money( $grand_total, $currency );
 
     return implode( "\n", $msg );
 }
