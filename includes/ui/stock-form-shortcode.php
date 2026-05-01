@@ -1936,6 +1936,7 @@ add_shortcode('wc_suf_my_sale_orders', function(){
     .wc-suf-order-group h4{margin:0;padding:10px 12px;background:#f8fafc;border-bottom:1px solid #e5e7eb}
     .wc-suf-order-group table{width:100%;border-collapse:collapse;font-size:13px}
     .wc-suf-order-group th,.wc-suf-order-group td{padding:8px;border:1px solid #e5e7eb;text-align:right}
+    .wc-suf-order-customer-meta{font-size:11px;color:#64748b;display:grid;gap:4px;padding:8px 10px;border:1px dashed #cbd5e1;border-radius:10px;background:#f8fafc}
     </style>';
     $pending_report_url = wp_nonce_url(
         admin_url( 'admin-ajax.php?action=wc_suf_pending_products_report' ),
@@ -2020,6 +2021,9 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         }
         $detail_payload = [
             'order_number' => (string) $order->get_order_number(),
+            'customer_name' => (string) ( $order->get_meta('_wc_suf_sale_customer_name', true ) ?: $order->get_formatted_billing_full_name() ),
+            'customer_mobile' => (string) ( $order->get_meta('_wc_suf_sale_customer_mobile', true ) ?: $order->get_billing_phone() ),
+            'customer_address' => (string) ( $order->get_meta('_wc_suf_sale_customer_address', true ) ?: $order->get_billing_address_1() ),
             'registered' => $registered_rows,
             'pending' => is_array($pending_rows) ? array_values($pending_rows) : [],
         ];
@@ -2113,12 +2117,23 @@ add_shortcode('wc_suf_my_sale_orders', function(){
             html += '</tbody></table></div>';
             return html;
         }
+        function renderCustomerMeta(payload){
+            const customerName = payload && payload.customer_name ? payload.customer_name : '—';
+            const customerMobile = payload && payload.customer_mobile ? payload.customer_mobile : '—';
+            const customerAddress = payload && payload.customer_address ? payload.customer_address : '—';
+            return '<div class="wc-suf-order-customer-meta">'
+                + '<div><strong>نام مشتری:</strong> ' + escHtml(customerName) + '</div>'
+                + '<div><strong>شماره همراه:</strong> ' + escHtml(customerMobile) + '</div>'
+                + '<div><strong>آدرس:</strong> ' + escHtml(customerAddress) + '</div>'
+                + '</div>';
+        }
         $(document).on('click', '.wc-suf-order-detail-btn', function(){
             let payload = null;
             try{ payload = JSON.parse(String($(this).attr('data-order-detail') || '{}')); }catch(e){ payload = null; }
             if(!payload){ return; }
             $('#wc-suf-order-detail-title').text('جزئیات سفارش #' + String(payload.order_number || ''));
-            const bodyHtml = renderOrderGroup('محصولات ثبت‌شده', payload.registered || [], 'qty')
+            const bodyHtml = renderCustomerMeta(payload)
+                + renderOrderGroup('محصولات ثبت‌شده', payload.registered || [], 'qty')
                 + renderOrderGroup('محصولات در انتظار', payload.pending || [], 'pending_qty');
             $('#wc-suf-order-detail-body').html(bodyHtml);
             $('#wc-suf-order-detail-modal').addClass('is-open').attr('aria-hidden', 'false');
