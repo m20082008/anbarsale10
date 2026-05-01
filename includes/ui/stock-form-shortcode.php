@@ -2014,8 +2014,21 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         echo '<td style="padding:8px; border:1px solid #e5e7eb">';
         $registered_rows = [];
         foreach ( $order->get_items('line_item') as $item ) {
+            $item_product_id = (int) $item->get_variation_id();
+            if ( $item_product_id <= 0 ) {
+                $item_product_id = (int) $item->get_product_id();
+            }
+            $item_product = $item_product_id > 0 ? wc_get_product( $item_product_id ) : null;
+            $item_product_code = '';
+            if ( $item_product && is_a( $item_product, 'WC_Product' ) ) {
+                $item_product_code = (string) $item_product->get_sku();
+            }
+            if ( $item_product_code === '' && $item_product_id > 0 ) {
+                $item_product_code = (string) $item_product_id;
+            }
             $registered_rows[] = [
                 'name' => (string) $item->get_name(),
+                'product_code' => $item_product_code,
                 'qty' => max( 0, (float) $item->get_quantity() ),
             ];
         }
@@ -2112,7 +2125,9 @@ add_shortcode('wc_suf_my_sale_orders', function(){
             rows.forEach(function(row){
                 const qty = parseFloat(row && row[qtyKey] != null ? row[qtyKey] : row && row.qty != null ? row.qty : 0) || 0;
                 const name = row && (row.name || row.product_name || row.title) ? (row.name || row.product_name || row.title) : '—';
-                html += '<tr><td>'+escHtml(name)+'</td><td style="text-align:center">'+escHtml(qty)+'</td></tr>';
+                const code = row && (row.product_code || row.sku || row.product_id || row.id) ? (row.product_code || row.sku || row.product_id || row.id) : '';
+                const label = code !== '' ? (String(name) + ' (' + String(code) + ')') : String(name);
+                html += '<tr><td>'+escHtml(label)+'</td><td style="text-align:center">'+escHtml(qty)+'</td></tr>';
             });
             html += '</tbody></table></div>';
             return html;
