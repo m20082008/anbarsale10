@@ -85,11 +85,39 @@ function wc_suf_telegram_detect_order_source( WC_Order $order ) {
         if ( $branch === '' ) {
             $branch = (string) $order->get_meta( '_yith_pos_store', true );
         }
-        return $branch !== '' ? 'YITH POS - شعبه: ' . $branch : 'YITH POS';
+        return $branch !== '' ? 'شعبه - ' . $branch : 'شعبه';
     }
 
     $is_new_app = (bool) $order->get_meta( '_from_new_app', true ) || (bool) $order->get_meta( '_order_from_app', true );
-    return $is_new_app ? 'نرم افزار جدید' : 'وبسایت';
+    return $is_new_app ? 'نرم افزار' : 'وبسایت';
+}
+
+function wc_suf_telegram_get_order_seller_username( WC_Order $order ) {
+    $seller = trim( (string) $order->get_meta( '_wc_suf_seller_name', true ) );
+    if ( $seller === '' ) {
+        $seller = trim( (string) $order->get_meta( 'فروشنده', true ) );
+    }
+    if ( $seller !== '' ) {
+        return $seller;
+    }
+
+    $customer_id = (int) $order->get_customer_id();
+    if ( $customer_id > 0 ) {
+        $customer = get_user_by( 'id', $customer_id );
+        if ( $customer && ! empty( $customer->user_login ) ) {
+            return (string) $customer->user_login;
+        }
+    }
+
+    $author_id = (int) get_post_field( 'post_author', $order->get_id() );
+    if ( $author_id > 0 ) {
+        $author = get_user_by( 'id', $author_id );
+        if ( $author && ! empty( $author->user_login ) ) {
+            return (string) $author->user_login;
+        }
+    }
+
+    return 'نامشخص';
 }
 
 function wc_suf_telegram_get_pending_items( WC_Order $order ) {
@@ -312,7 +340,9 @@ function wc_suf_telegram_build_order_message( WC_Order $order ) {
 
     $msg = [];
     $msg[] = '✅ سفارش جدید!';
+    $msg[] = '🧭 مرجع سفارش: ' . wc_suf_telegram_detect_order_source( $order );
     $msg[] = '🧾 نحوه فروش: ' . $sales_method;
+    $msg[] = '🧑‍💼 فروشنده: ' . wc_suf_telegram_get_order_seller_username( $order );
     $msg[] = '🔢 شماره سفارش: ' . $order->get_order_number();
     $msg[] = '🕒 تاریخ ایجاد سفارش: ' . $created_text;
     $msg[] = '👤 نام مشتری: ' . $customer_name;
