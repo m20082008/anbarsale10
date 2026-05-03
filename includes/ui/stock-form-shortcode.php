@@ -218,6 +218,8 @@ add_shortcode('stock_update_form', function($atts){
         .wc-suf-sale-customer-row{grid-template-columns:1fr}
         .wc-suf-sale-customer-field{flex-direction:column; align-items:stretch}
         .wc-suf-sale-customer-field label{min-width:unset; width:100%; font-size:13px}
+        .wc-suf-table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; border:1px solid #e5e7eb; border-radius:10px}
+        #items-table{min-width:780px; margin-top:0 !important; border:none !important}
       }
     </style>
 
@@ -351,18 +353,20 @@ add_shortcode('stock_update_form', function($atts){
           <span class="suf-muted">ابتدا نوع عملیات را انتخاب کنید، سپس محصولات را در پنجره انتخاب کنید.</span>
         </div>
 
-        <table id="items-table" style="margin-top:10px; display:none; width:100%; border-collapse:collapse; border:1px solid #e5e7eb; font-size:14px">
-          <thead>
-            <tr style="background:#f3f4f6; border-bottom:1px solid #e5e7eb">
-              <th style="padding:8px; text-align:right; width:110px">ID</th>
-              <th style="padding:8px; text-align:right">محصول</th>
-              <th style="padding:8px; text-align:center; width:140px">موجودی فعلی</th>
-              <th style="padding:8px; text-align:center; width:280px">تعداد (+/−)</th>
-              <th style="padding:8px; text-align:center; width:100px">حذف</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+        <div class="wc-suf-table-scroll">
+          <table id="items-table" style="margin-top:10px; display:none; width:100%; border-collapse:collapse; border:1px solid #e5e7eb; font-size:14px">
+            <thead>
+              <tr style="background:#f3f4f6; border-bottom:1px solid #e5e7eb">
+                <th style="padding:8px; text-align:right; width:110px">ID</th>
+                <th style="padding:8px; text-align:right">محصول</th>
+                <th style="padding:8px; text-align:center; width:140px">موجودی فعلی</th>
+                <th style="padding:8px; text-align:center; width:280px">تعداد (+/−)</th>
+                <th style="padding:8px; text-align:center; width:100px">حذف</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
 
         <div id="items-total-wrap" style="display:none; font-weight:700; color:#1f2937">جمع کل تعداد: <span id="items-total-value">0</span></div>
 
@@ -1987,6 +1991,13 @@ add_shortcode('wc_suf_my_sale_orders', function(){
     .wc-suf-order-group table{width:100%;border-collapse:collapse;font-size:13px}
     .wc-suf-order-group th,.wc-suf-order-group td{padding:8px;border:1px solid #e5e7eb;text-align:right}
     .wc-suf-order-customer-meta{font-size:11px;color:#64748b;display:grid;gap:4px;padding:8px 10px;border:1px dashed #cbd5e1;border-radius:10px;background:#f8fafc}
+    .wc-suf-orders-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid #e5e7eb;border-radius:10px}
+    .wc-suf-orders-table{width:100%;border-collapse:collapse;border:1px solid #e5e7eb;font-size:13px}
+    @media (max-width: 768px){
+      .wc-suf-orders-table{min-width:980px;font-size:12px}
+      .wc-suf-orders-table th,.wc-suf-orders-table td{padding:7px !important;white-space:nowrap}
+      .wc-suf-order-group table{min-width:420px}
+    }
     </style>';
     $pending_report_url = wp_nonce_url(
         admin_url( 'admin-ajax.php?action=wc_suf_pending_products_report' ),
@@ -2001,7 +2012,8 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         echo '</div>';
         return ob_get_clean();
     }
-    echo '<table style="width:100%; border-collapse:collapse; border:1px solid #e5e7eb; font-size:13px">';
+    echo '<div class="wc-suf-orders-table-wrap">';
+    echo '<table class="wc-suf-orders-table">';
     echo '<thead><tr style="background:#f3f4f6">';
     echo '<th style="padding:8px; border:1px solid #e5e7eb">شماره سفارش</th>';
     echo '<th style="padding:8px; border:1px solid #e5e7eb">تاریخ</th>';
@@ -2120,6 +2132,7 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         echo '</tr>';
     }
     echo '</tbody></table>';
+    echo '</div>';
     echo '<div id="wc-suf-complete-order-toast" style="display:none; position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:99999; min-width:260px; max-width:min(92vw, 540px); padding:12px 14px; border-radius:12px; border:1px solid transparent; box-shadow:0 10px 24px rgba(15,23,42,.18); font-weight:700">';
     echo '<div style="display:flex; align-items:center; gap:10px">';
     echo '<div id="wc-suf-complete-order-toast-text" style="flex:1; text-align:right"></div>';
