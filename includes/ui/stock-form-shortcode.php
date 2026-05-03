@@ -637,6 +637,7 @@ add_shortcode('stock_update_form', function($atts){
                 $('#sale-customer-mobile').val(saleCustomerMobile);
                 $('#sale-customer-address').val(saleCustomerAddress);
                 $('#sale-method').val(saleMethod);
+                applySaleAddressRule();
 
                 items.length = 0;
                 const editItems = Array.isArray(data.items) ? data.items : [];
@@ -932,6 +933,43 @@ add_shortcode('stock_update_form', function($atts){
                 return false;
             }
             return true;
+        }
+
+        function getSaleAddressRuleByMethod(method){
+            const saleMethodKey = String(method || '');
+            if(saleMethodKey === 'tehranpars_onsite'){
+                return { fixedOnly: true, fixedText: 'به شعبه تهرانپارس تحویل گردد.' };
+            }
+            if(saleMethodKey === 'snap'){
+                return { fixedOnly: false, fixedPrefix: 'اسنپ شود به ' };
+            }
+            if(saleMethodKey === 'tipax'){
+                return { fixedOnly: false, fixedPrefix: 'تیپاکس شود به ' };
+            }
+            return { fixedOnly: false, fixedPrefix: '' };
+        }
+
+        function applySaleAddressRule(){
+            const $address = $('#sale-customer-address');
+            const rule = getSaleAddressRuleByMethod(saleMethod);
+            const rawValue = String($address.val() || '');
+            const prefix = String(rule.fixedPrefix || '');
+
+            if(rule.fixedOnly){
+                $address.prop('readonly', true).val(rule.fixedText);
+                saleCustomerAddress = rule.fixedText;
+                return;
+            }
+
+            $address.prop('readonly', false);
+            let nextValue = rawValue;
+            if(prefix && nextValue.indexOf(prefix) !== 0){
+                nextValue = prefix + nextValue.trim();
+            }
+            if(nextValue !== rawValue){
+                $address.val(nextValue);
+            }
+            saleCustomerAddress = nextValue;
         }
 
         function getTransferWarehouseStockByProduct(p, warehouse){
@@ -1645,6 +1683,7 @@ add_shortcode('stock_update_form', function($atts){
         if(isSaleUserRole){
             saleMethod = 'post';
             $('#sale-method').val('post');
+            applySaleAddressRule();
         }
         if(isEditModeRequested){
             loadSaleOrderForEdit();
@@ -1701,13 +1740,21 @@ add_shortcode('stock_update_form', function($atts){
             syncSaleHoldOrder(false);
         });
         $('#sale-customer-address').on('input', function(){
-            saleCustomerAddress = $(this).val() || '';
+            const rule = getSaleAddressRuleByMethod(saleMethod);
+            const prefix = String(rule.fixedPrefix || '');
+            let nextValue = String($(this).val() || '');
+            if(prefix && nextValue.indexOf(prefix) !== 0){
+                nextValue = prefix + nextValue.replace(prefix, '').trim();
+                $(this).val(nextValue);
+            }
+            saleCustomerAddress = nextValue;
             refreshPickerOpenButton();
             refreshActionButtons();
             syncSaleHoldOrder(false);
         });
         $('#sale-method').on('change', function(){
             saleMethod = $(this).val() || '';
+            applySaleAddressRule();
             refreshPickerOpenButton();
             refreshActionButtons();
             syncSaleHoldOrder(false);
