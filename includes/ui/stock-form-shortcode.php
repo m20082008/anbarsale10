@@ -441,7 +441,7 @@ add_shortcode('stock_update_form', function($atts){
         function ensureGlobalFeedbackUi(){
             if($('#wc-suf-global-toast').length === 0){
                 $('body').append(
-                    '<div id="wc-suf-global-toast" style="display:none; position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:99999; min-width:260px; max-width:min(92vw, 560px); padding:12px 14px; border-radius:12px; border:1px solid transparent; box-shadow:0 10px 24px rgba(15,23,42,.18); font-weight:700;">'
+                    '<div id="wc-suf-global-toast" style="display:none; position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:1000003; min-width:260px; max-width:min(92vw, 560px); padding:12px 14px; border-radius:12px; border:1px solid transparent; box-shadow:0 10px 24px rgba(15,23,42,.18); font-weight:700;">'
                     + '<div style="display:flex; align-items:center; gap:10px">'
                     + '<div id="wc-suf-global-toast-text" style="flex:1; text-align:right"></div>'
                     + '<button type="button" id="wc-suf-global-toast-close" aria-label="بستن پیام" style="border:1px solid currentColor; background:transparent; color:inherit; border-radius:8px; cursor:pointer; font-weight:800; padding:2px 8px; line-height:1.4">✕</button>'
@@ -450,7 +450,7 @@ add_shortcode('stock_update_form', function($atts){
             }
             if($('#wc-suf-confirm-modal').length === 0){
                 $('body').append(
-                    '<div id="wc-suf-confirm-modal" style="display:none; position:fixed; inset:0; z-index:100000; background:rgba(15,23,42,.35); align-items:center; justify-content:center; padding:16px;">'
+                    '<div id="wc-suf-confirm-modal" style="display:none; position:fixed; inset:0; z-index:1000004; background:rgba(15,23,42,.35); align-items:center; justify-content:center; padding:16px;">'
                     + '<div style="width:min(92vw,460px); background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:0 18px 48px rgba(15,23,42,.25); padding:16px;">'
                     + '<div id="wc-suf-confirm-modal-text" style="font-weight:700; color:#0f172a; line-height:1.9; margin-bottom:14px; white-space:pre-line;"></div>'
                     + '<div style="display:flex; justify-content:flex-start; direction:rtl; gap:10px;">'
