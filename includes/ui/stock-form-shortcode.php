@@ -218,6 +218,13 @@ add_shortcode('stock_update_form', function($atts){
         .wc-suf-sale-customer-row{grid-template-columns:1fr}
         .wc-suf-sale-customer-field{flex-direction:column; align-items:stretch}
         .wc-suf-sale-customer-field label{min-width:unset; width:100%; font-size:13px}
+        .wc-suf-table-scroll{overflow:visible; border:0}
+        #items-table{margin-top:0 !important}
+        #items-table thead{display:none}
+        #items-table, #items-table tbody, #items-table tr, #items-table td{display:block; width:100%}
+        #items-table tr{border:1px solid #e5e7eb; border-radius:12px; background:#fff; margin-bottom:10px; padding:6px 8px}
+        #items-table td{border:none; padding:6px 0 !important; text-align:right !important}
+        #items-table td::before{content:attr(data-label); display:block; font-size:11px; color:#6b7280; margin-bottom:2px; font-weight:700}
       }
     </style>
 
@@ -351,18 +358,20 @@ add_shortcode('stock_update_form', function($atts){
           <span class="suf-muted">ابتدا نوع عملیات را انتخاب کنید، سپس محصولات را در پنجره انتخاب کنید.</span>
         </div>
 
-        <table id="items-table" style="margin-top:10px; display:none; width:100%; border-collapse:collapse; border:1px solid #e5e7eb; font-size:14px">
-          <thead>
-            <tr style="background:#f3f4f6; border-bottom:1px solid #e5e7eb">
-              <th style="padding:8px; text-align:right; width:110px">ID</th>
-              <th style="padding:8px; text-align:right">محصول</th>
-              <th style="padding:8px; text-align:center; width:140px">موجودی فعلی</th>
-              <th style="padding:8px; text-align:center; width:280px">تعداد (+/−)</th>
-              <th style="padding:8px; text-align:center; width:100px">حذف</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+        <div class="wc-suf-table-scroll">
+          <table id="items-table" style="margin-top:10px; display:none; width:100%; border-collapse:collapse; border:1px solid #e5e7eb; font-size:14px">
+            <thead>
+              <tr style="background:#f3f4f6; border-bottom:1px solid #e5e7eb">
+                <th style="padding:8px; text-align:right; width:110px">ID</th>
+                <th style="padding:8px; text-align:right">محصول</th>
+                <th style="padding:8px; text-align:center; width:140px">موجودی فعلی</th>
+                <th style="padding:8px; text-align:center; width:280px">تعداد (+/−)</th>
+                <th style="padding:8px; text-align:center; width:100px">حذف</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
 
         <div id="items-total-wrap" style="display:none; font-weight:700; color:#1f2937">جمع کل تعداد: <span id="items-total-value">0</span></div>
 
@@ -1040,6 +1049,7 @@ add_shortcode('stock_update_form', function($atts){
             const isReturnMain = (opType === 'return' && returnDestination === 'main');
             const isReturnTeh  = (opType === 'return' && returnDestination === 'teh');
             const isSaleOperation = (opType === 'sale' || opType === 'sale_teh');
+            const sourceLabel = isTransfer ? 'موجودی انبار مبدا' : 'موجودی انبار تولید';
 
             theadRow.append('<th style="padding:8px; text-align:right; width:110px">ID</th>');
             theadRow.append('<th style="padding:8px; text-align:right">محصول</th>');
@@ -1087,42 +1097,42 @@ add_shortcode('stock_update_form', function($atts){
 
             items.forEach((it,idx)=>{
                 const tr = $('<tr style="border-top:1px solid #e5e7eb">');
-                tr.append(`<td style="padding:8px">${escapeHtml(it.id)}</td>`);
-                tr.append(`<td style="padding:8px">${escapeHtml(it.name)}</td>`);
+                tr.append(`<td data-label="ID" style="padding:8px">${escapeHtml(it.id)}</td>`);
+                tr.append(`<td data-label="محصول" style="padding:8px">${escapeHtml(it.name)}</td>`);
                 const sourceStock = isTransfer ? findTransferSourceStockById(it.id) : it.stock;
-                tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(sourceStock)}</td>`);
+                tr.append(`<td data-label="${escapeHtml(sourceLabel)}" style="padding:8px; text-align:center">${escapeHtml(sourceStock)}</td>`);
 
                 if (isOutMain || isOutTeh){
                     const dst = getDestinationInfoById(it.id);
-                    tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(dst.stock)}</td>`);
+                    tr.append(`<td data-label="${escapeHtml(isOutMain ? 'موجودی انبار اصلی' : 'موجودی انبار تهران‌پارس')}" style="padding:8px; text-align:center">${escapeHtml(dst.stock)}</td>`);
                 } else if (isTransfer){
                     const p = findById(it.id);
                     const dstStock = getTransferWarehouseStockByProduct(p, transferDestination);
-                    tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(dstStock)}</td>`);
+                    tr.append(`<td data-label="${escapeHtml((transferDestination === 'main') ? 'موجودی انبار اصلی' : 'موجودی انبار تهران‌پارس')}" style="padding:8px; text-align:center">${escapeHtml(dstStock)}</td>`);
                 } else if (isReturnMain || isReturnTeh){
                     const p = findById(it.id);
                     const returnStock = (returnDestination === 'main') ? (+p.wc_stock || 0) : (+p.teh_stock || 0);
-                    tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(returnStock)}</td>`);
+                    tr.append(`<td data-label="${escapeHtml(isReturnMain ? 'موجودی انبار اصلی' : 'موجودی انبار تهران‌پارس')}" style="padding:8px; text-align:center">${escapeHtml(returnStock)}</td>`);
                 } else if (isSaleOperation){
                     const baseMainStock = Math.max(0, Number.isFinite(+it.sale_base_stock) ? (+it.sale_base_stock) : findMainStockById(it.id));
                     const remainingMainStock = Math.max(0, baseMainStock - (parseInt(it.qty, 10) || 0));
-                    tr.append(`<td style="padding:8px; text-align:center">${escapeHtml(remainingMainStock)}</td>`);
+                    tr.append(`<td data-label="موجودی انبار اصلی" style="padding:8px; text-align:center">${escapeHtml(remainingMainStock)}</td>`);
                 }
                 if (isSaleOperation){
                     recomputeSaleSplitForItem(it);
-                    tr.append(`<td style="padding:8px; text-align:center; color:#065f46; font-weight:700">${escapeHtml(it.sale_allocated_qty || 0)}</td>`);
-                    tr.append(`<td style="padding:8px; text-align:center; color:#b45309; font-weight:700">${escapeHtml(it.sale_pending_qty || 0)}</td>`);
+                    tr.append(`<td data-label="تخصیص از انبار" style="padding:8px; text-align:center; color:#065f46; font-weight:700">${escapeHtml(it.sale_allocated_qty || 0)}</td>`);
+                    tr.append(`<td data-label="در انتظار" style="padding:8px; text-align:center; color:#b45309; font-weight:700">${escapeHtml(it.sale_pending_qty || 0)}</td>`);
                 }
 
                 const qtyControls = $(`
-                  <td style="padding:6px; text-align:center">
+                  <td data-label="تعداد (+/−)" style="padding:6px; text-align:center">
                     <button class="row-dec" data-i="${idx}" style="font-size:18px; padding:4px 10px; margin-inline:4px">➖</button>
                     <input type="number" class="row-qty" data-i="${idx}" value="${escapeHtml(it.qty)}" min="1" style="width:80px; text-align:center; font-size:16px; padding:4px">
                     <button class="row-inc" data-i="${idx}" style="font-size:18px; padding:4px 10px; margin-inline:4px">➕</button>
                   </td>
                 `);
                 tr.append(qtyControls);
-                tr.append(`<td style="padding:8px; text-align:center"><button data-i="${idx}" class="btn-del" style="cursor:pointer">❌</button></td>`);
+                tr.append(`<td data-label="حذف" style="padding:8px; text-align:center"><button data-i="${idx}" class="btn-del" style="cursor:pointer">❌</button></td>`);
                 tbody.append(tr);
             });
         }
@@ -1987,6 +1997,20 @@ add_shortcode('wc_suf_my_sale_orders', function(){
     .wc-suf-order-group table{width:100%;border-collapse:collapse;font-size:13px}
     .wc-suf-order-group th,.wc-suf-order-group td{padding:8px;border:1px solid #e5e7eb;text-align:right}
     .wc-suf-order-customer-meta{font-size:11px;color:#64748b;display:grid;gap:4px;padding:8px 10px;border:1px dashed #cbd5e1;border-radius:10px;background:#f8fafc}
+    .wc-suf-orders-table-wrap{overflow:visible;border:0}
+    .wc-suf-orders-table{width:100%;border-collapse:collapse;border:1px solid #e5e7eb;font-size:13px}
+    @media (max-width: 768px){
+      .wc-suf-orders-table{font-size:12px;border:none}
+      .wc-suf-orders-table thead{display:none}
+      .wc-suf-orders-table, .wc-suf-orders-table tbody, .wc-suf-orders-table tr, .wc-suf-orders-table td{display:block;width:100%}
+      .wc-suf-orders-table tr{border:1px solid #e5e7eb;border-radius:12px;background:#fff;margin-bottom:10px;padding:6px 8px}
+      .wc-suf-orders-table td{border:none !important;padding:6px 0 !important;text-align:right !important;white-space:normal !important}
+      .wc-suf-orders-table td::before{content:attr(data-label);display:block;font-size:11px;color:#6b7280;margin-bottom:2px;font-weight:700}
+      .wc-suf-order-modal{padding:0;background:#fff}
+      .wc-suf-order-modal-card{width:100vw;max-height:100vh;height:100vh;border-radius:0;box-shadow:none}
+      .wc-suf-order-modal-head{position:sticky;top:0;z-index:2}
+      .wc-suf-order-group table{min-width:unset}
+    }
     </style>';
     $pending_report_url = wp_nonce_url(
         admin_url( 'admin-ajax.php?action=wc_suf_pending_products_report' ),
@@ -2001,7 +2025,8 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         echo '</div>';
         return ob_get_clean();
     }
-    echo '<table style="width:100%; border-collapse:collapse; border:1px solid #e5e7eb; font-size:13px">';
+    echo '<div class="wc-suf-orders-table-wrap">';
+    echo '<table class="wc-suf-orders-table">';
     echo '<thead><tr style="background:#f3f4f6">';
     echo '<th style="padding:8px; border:1px solid #e5e7eb">شماره سفارش</th>';
     echo '<th style="padding:8px; border:1px solid #e5e7eb">تاریخ</th>';
@@ -2061,7 +2086,7 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         }
 
         echo '<tr>';
-        echo '<td style="padding:8px; border:1px solid #e5e7eb">';
+        echo '<td data-label="شماره سفارش" style="padding:8px; border:1px solid #e5e7eb">';
         $registered_rows = [];
         foreach ( $order->get_items('line_item') as $item ) {
             $item_product_id = (int) $item->get_variation_id();
@@ -2092,13 +2117,13 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         ];
         echo '<button type="button" class="wc-suf-order-detail-btn" data-order-detail=\''.esc_attr( wp_json_encode( $detail_payload, JSON_UNESCAPED_UNICODE ) ).'\' style="border:none; background:none; color:#1d4ed8; font-weight:700; text-decoration:none; cursor:pointer; padding:0">#'.esc_html( $order->get_order_number() ).'</button>';
         echo '</td>';
-        echo '<td style="padding:8px; border:1px solid #e5e7eb">'.esc_html( $order->get_date_created() ? $order->get_date_created()->date_i18n('Y/m/d H:i') : '-' ).'</td>';
-        echo '<td style="padding:8px; border:1px solid #e5e7eb">'.esc_html( wc_get_order_status_name( $order->get_status() ) ).'</td>';
-        echo '<td style="padding:8px; border:1px solid #e5e7eb">'.esc_html( $order->get_meta('_wc_suf_sale_customer_name', true ) ?: $order->get_formatted_billing_full_name() ).'</td>';
-        echo '<td style="padding:8px; border:1px solid #e5e7eb">'.esc_html( $order->get_meta('_wc_suf_sale_method_label', true ) ?: '-' ).'</td>';
-        echo '<td style="padding:8px; border:1px solid #e5e7eb; text-align:center">'.esc_html( $item_count ).'</td>';
-        echo '<td style="padding:8px; border:1px solid #e5e7eb; text-align:center; color:'.( $pending_qty > 0 ? '#b45309' : '#065f46' ).'; font-weight:700">'.esc_html( $pending_qty ).'</td>';
-        echo '<td style="padding:8px; border:1px solid #e5e7eb; text-align:center">';
+        echo '<td data-label="تاریخ" style="padding:8px; border:1px solid #e5e7eb">'.esc_html( $order->get_date_created() ? $order->get_date_created()->date_i18n('Y/m/d H:i') : '-' ).'</td>';
+        echo '<td data-label="وضعیت" style="padding:8px; border:1px solid #e5e7eb">'.esc_html( wc_get_order_status_name( $order->get_status() ) ).'</td>';
+        echo '<td data-label="مشتری" style="padding:8px; border:1px solid #e5e7eb">'.esc_html( $order->get_meta('_wc_suf_sale_customer_name', true ) ?: $order->get_formatted_billing_full_name() ).'</td>';
+        echo '<td data-label="نحوه فروش" style="padding:8px; border:1px solid #e5e7eb">'.esc_html( $order->get_meta('_wc_suf_sale_method_label', true ) ?: '-' ).'</td>';
+        echo '<td data-label="تعداد اقلام" style="padding:8px; border:1px solid #e5e7eb; text-align:center">'.esc_html( $item_count ).'</td>';
+        echo '<td data-label="در انتظار" style="padding:8px; border:1px solid #e5e7eb; text-align:center; color:'.( $pending_qty > 0 ? '#b45309' : '#065f46' ).'; font-weight:700">'.esc_html( $pending_qty ).'</td>';
+        echo '<td data-label="ویرایش" style="padding:8px; border:1px solid #e5e7eb; text-align:center">';
         if ( $can_edit_order ) {
             echo '<a href="'.esc_url( $edit_url ).'" title="ویرایش سفارش" aria-label="ویرایش سفارش #'.esc_attr( $order->get_order_number() ).'" style="display:inline-flex; align-items:center; gap:4px; padding:6px 10px; border:1px solid #1d4ed8; color:#1d4ed8; border-radius:8px; text-decoration:none; font-weight:700">';
             echo '<span aria-hidden="true">✏️</span><span>ویرایش</span>';
@@ -2110,7 +2135,7 @@ add_shortcode('wc_suf_my_sale_orders', function(){
             }
         }
         echo '</td>';
-        echo '<td style="padding:8px; border:1px solid #e5e7eb; text-align:center">';
+        echo '<td data-label="تکمیل سفارش" style="padding:8px; border:1px solid #e5e7eb; text-align:center">';
         if ( $pending_qty > 0 && $order->has_status('pendingreview') ) {
             echo '<button type="button" class="wc-suf-complete-order-btn" data-order-id="'.esc_attr( $order->get_id() ).'" style="padding:8px 10px; border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:8px; cursor:pointer">تکمیل سفارش</button>';
         } else {
@@ -2120,6 +2145,7 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         echo '</tr>';
     }
     echo '</tbody></table>';
+    echo '</div>';
     echo '<div id="wc-suf-complete-order-toast" style="display:none; position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:99999; min-width:260px; max-width:min(92vw, 540px); padding:12px 14px; border-radius:12px; border:1px solid transparent; box-shadow:0 10px 24px rgba(15,23,42,.18); font-weight:700">';
     echo '<div style="display:flex; align-items:center; gap:10px">';
     echo '<div id="wc-suf-complete-order-toast-text" style="flex:1; text-align:right"></div>';
