@@ -2074,10 +2074,20 @@ add_shortcode('wc_suf_my_sale_orders', function(){
         }
         $pending_meta = (string) $order->get_meta('_wc_suf_pending_breakdown', true );
         $pending_rows = json_decode( $pending_meta, true );
+        $pending_display_rows = [];
         $pending_qty = 0;
         if ( is_array($pending_rows) ) {
             foreach ( $pending_rows as $row ) {
-                $pending_qty += max( 0, (int) ( $row['pending_qty'] ?? 0 ) );
+                if ( ! is_array( $row ) ) {
+                    continue;
+                }
+                $row_pending_qty = max( 0, (float) ( $row['pending_qty'] ?? 0 ) );
+                if ( $row_pending_qty <= 0 ) {
+                    continue;
+                }
+                $row['pending_qty'] = $row_pending_qty;
+                $pending_display_rows[] = $row;
+                $pending_qty += $row_pending_qty;
             }
         }
         $item_count = 0;
@@ -2113,7 +2123,7 @@ add_shortcode('wc_suf_my_sale_orders', function(){
             'customer_mobile' => (string) ( $order->get_meta('_wc_suf_sale_customer_mobile', true ) ?: $order->get_billing_phone() ),
             'customer_address' => (string) ( $order->get_meta('_wc_suf_sale_customer_address', true ) ?: $order->get_billing_address_1() ),
             'registered' => $registered_rows,
-            'pending' => is_array($pending_rows) ? array_values($pending_rows) : [],
+            'pending' => $pending_display_rows,
         ];
         echo '<button type="button" class="wc-suf-order-detail-btn" data-order-detail=\''.esc_attr( wp_json_encode( $detail_payload, JSON_UNESCAPED_UNICODE ) ).'\' style="border:none; background:none; color:#1d4ed8; font-weight:700; text-decoration:none; cursor:pointer; padding:0">#'.esc_html( $order->get_order_number() ).'</button>';
         echo '</td>';
@@ -2199,11 +2209,18 @@ add_shortcode('wc_suf_my_sale_orders', function(){
             });
         }
         function renderOrderGroup(title, rows, qtyKey){
-            if(!Array.isArray(rows) || !rows.length){
+            if(!Array.isArray(rows)){
+                rows = [];
+            }
+            const displayRows = rows.filter(function(row){
+                const qty = parseFloat(row && row[qtyKey] != null ? row[qtyKey] : row && row.qty != null ? row.qty : 0) || 0;
+                return qty > 0;
+            });
+            if(!displayRows.length){
                 return '<div class="wc-suf-order-group"><h4>'+escHtml(title)+'</h4><div style="padding:10px 12px;color:#64748b">موردی ثبت نشده است.</div></div>';
             }
             let html = '<div class="wc-suf-order-group"><h4>'+escHtml(title)+'</h4><table><thead><tr><th>محصول</th><th style="width:120px">تعداد</th></tr></thead><tbody>';
-            rows.forEach(function(row){
+            displayRows.forEach(function(row){
                 const qty = parseFloat(row && row[qtyKey] != null ? row[qtyKey] : row && row.qty != null ? row.qty : 0) || 0;
                 const name = row && (row.name || row.product_name || row.title) ? (row.name || row.product_name || row.title) : '—';
                 const code = row && (row.product_code || row.sku || row.product_id || row.id) ? (row.product_code || row.sku || row.product_id || row.id) : '';
