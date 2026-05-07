@@ -1486,10 +1486,33 @@ function wc_suf_complete_pending_sale_handler(){
         wp_send_json_error(['message' => 'شما دسترسی تکمیل این سفارش را ندارید.']);
     }
 
+    if ( ! $order->has_status( 'pendingreview' ) ) {
+        wp_send_json_error(['message' => 'فقط سفارش‌های در انتظار قابل تکمیل یا بستن هستند.']);
+    }
+
     $pending_raw = (string) $order->get_meta('_wc_suf_pending_breakdown', true);
     $pending_rows = json_decode( $pending_raw, true );
-    if ( ! is_array($pending_rows) || empty($pending_rows) ) {
-        wp_send_json_error(['message' => 'محصول در انتظاری برای این سفارش ثبت نشده است.']);
+    if ( ! is_array($pending_rows) ) {
+        $pending_rows = [];
+    }
+
+    if ( empty($pending_rows) ) {
+        $order->update_meta_data( '_wc_suf_pending_breakdown', wp_json_encode( [], JSON_UNESCAPED_UNICODE ) );
+        $order->update_meta_data( '_wc_suf_pending_qty_total', 0 );
+        $order->update_meta_data( '_wc_suf_pending_qty_map', wp_json_encode( [], JSON_UNESCAPED_UNICODE ) );
+        $order->update_meta_data( '_wc_qof_pending_items', wp_json_encode( [], JSON_UNESCAPED_UNICODE ) );
+        $order->update_meta_data( '_wc_qof_pending_req_qty', wp_json_encode( [], JSON_UNESCAPED_UNICODE ) );
+        $order->update_meta_data( '_wc_qof_pending_price_map', wp_json_encode( [], JSON_UNESCAPED_UNICODE ) );
+        wc_suf_update_pending_order_visible_meta( $order, [] );
+        $order->set_status( 'processing', 'بستن سفارش بدون اقلام در انتظار از لیست سفارش‌ها.' );
+        $order->save();
+
+        wp_send_json_success([
+            'message' => 'سفارش بسته شد و به وضعیت «در حال انجام» رفت.',
+            'allocated_now' => 0,
+            'pending_qty_total' => 0,
+            'product_ids' => [],
+        ]);
     }
 
     $updated_breakdown = [];

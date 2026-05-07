@@ -542,7 +542,7 @@ add_shortcode('stock_update_form', function($atts){
             if(isEditModeActive){
                 const num = editOrderNumber ? ('#' + editOrderNumber) : ('#' + saleHoldOrderId);
                 $modeTitle.text('ویرایش سفارش ' + num);
-                $('#btn-save').text('✅ ذخیره تغییرات');
+                $('#btn-save').text('✅ تکمیل سفارش');
                 $('#btn-save-pending').text('⏳ ذخیره موقت تغییرات');
             }else{
                 $modeTitle.text('ثبت سفارش جدید');
@@ -2036,7 +2036,7 @@ add_shortcode('wc_suf_my_sale_orders', function(){
     echo '<th style="padding:8px; border:1px solid #e5e7eb">تعداد اقلام</th>';
     echo '<th style="padding:8px; border:1px solid #e5e7eb">در انتظار</th>';
     echo '<th style="padding:8px; border:1px solid #e5e7eb">ویرایش</th>';
-    echo '<th style="padding:8px; border:1px solid #e5e7eb">تکمیل سفارش</th>';
+    echo '<th style="padding:8px; border:1px solid #e5e7eb">تکمیل/بستن سفارش</th>';
     echo '</tr></thead><tbody>';
 
     foreach ( $orders as $order ) {
@@ -2135,9 +2135,14 @@ add_shortcode('wc_suf_my_sale_orders', function(){
             }
         }
         echo '</td>';
-        echo '<td data-label="تکمیل سفارش" style="padding:8px; border:1px solid #e5e7eb; text-align:center">';
-        if ( $pending_qty > 0 && $order->has_status('pendingreview') ) {
-            echo '<button type="button" class="wc-suf-complete-order-btn" data-order-id="'.esc_attr( $order->get_id() ).'" style="padding:8px 10px; border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:8px; cursor:pointer">تکمیل سفارش</button>';
+        echo '<td data-label="تکمیل/بستن سفارش" style="padding:8px; border:1px solid #e5e7eb; text-align:center">';
+        if ( $order->has_status('pendingreview') ) {
+            if ( $pending_qty > 0 ) {
+                $complete_button_label = 'تکمیل سفارش';
+            } else {
+                $complete_button_label = 'تکمیل و بستن سفارش';
+            }
+            echo '<button type="button" class="wc-suf-complete-order-btn" data-order-id="'.esc_attr( $order->get_id() ).'" data-complete-label="'.esc_attr( $complete_button_label ).'" style="padding:8px 10px; border:1px solid #2563eb; background:#2563eb; color:#fff; border-radius:8px; cursor:pointer">'.esc_html( $complete_button_label ).'</button>';
         } else {
             echo '<span style="color:#6b7280">—</span>';
         }
@@ -2257,7 +2262,7 @@ add_shortcode('wc_suf_my_sale_orders', function(){
             }).fail(function(){
                 showCompleteOrderToast('خطای ارتباطی در تکمیل سفارش.', false);
             }).always(function(){
-                $btn.prop('disabled', false).css({opacity:1, cursor:'pointer'}).text('تکمیل سفارش');
+                $btn.prop('disabled', false).css({opacity:1, cursor:'pointer'}).text($btn.data('complete-label') || 'تکمیل سفارش');
             });
         });
     });
