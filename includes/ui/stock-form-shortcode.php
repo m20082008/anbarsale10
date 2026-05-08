@@ -812,6 +812,9 @@ add_shortcode('stock_update_form', function($atts){
         }
         function syncSaleHoldOrder(showErrors){
             if(!(opType === 'sale' || opType === 'sale_teh')) return $.Deferred().resolve({success:true}).promise();
+            if(isEditModeActive){
+                return $.Deferred().resolve({success:true, skipped:true}).promise();
+            }
             if(!Array.isArray(items) || items.length === 0){
                 if(saleHoldOrderId){
                     return $.post(ajaxurl, {
