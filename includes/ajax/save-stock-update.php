@@ -431,7 +431,7 @@ function wc_suf_log_sale_edit_change( $order, $product, $change_qty, $old_qty, $
     );
 }
 
-function wc_suf_reconcile_sale_order_items( $order, $requested_items, &$warnings = [] ) {
+function wc_suf_reconcile_sale_order_items( $order, $requested_items, &$warnings = [], $ignore_existing_allocations = false ) {
     $warnings = [];
     if ( ! $order || ! is_a( $order, 'WC_Order' ) ) {
         return new WP_Error( 'invalid_order', 'دسترسی به سفارش ممکن نیست.' );
@@ -460,7 +460,8 @@ function wc_suf_reconcile_sale_order_items( $order, $requested_items, &$warnings
     foreach ( $all_ids as $pid ) {
         $target_qty = max( 0, (int) ( $desired[$pid] ?? 0 ) );
         $entry = $existing_items[$pid] ?? null;
-        $allocated_old = $entry ? max( 0, (int) $entry['item']->get_quantity() ) : 0;
+        $stored_allocated_qty = $entry ? max( 0, (int) $entry['item']->get_quantity() ) : 0;
+        $allocated_old = $ignore_existing_allocations ? 0 : $stored_allocated_qty;
         $allocated_new = $allocated_old;
         $pending_qty = 0;
         $product = wc_get_product( $pid );
@@ -480,7 +481,7 @@ function wc_suf_reconcile_sale_order_items( $order, $requested_items, &$warnings
             if ( $alloc_delta < $need ) {
                 $warnings[] = sprintf('موجودی محصول #%d محدود بود و بخشی از مقدار به‌صورت در انتظار باقی ماند.', $pid);
             }
-        } elseif ( $target_qty < $allocated_old ) {
+        } elseif ( ! $ignore_existing_allocations && $target_qty < $allocated_old ) {
             $release = $allocated_old - $target_qty;
             if ( $release > 0 && $product ) {
                 $old_stock = (int) ( $product->get_stock_quantity() ?? 0 );
@@ -805,6 +806,7 @@ function wc_suf_save_stock_update_handler(){
     }
 
     $sale_edit_existing_qty_map = [];
+    $sale_edit_released_hold_order = false;
     if ( ( $op_type === 'sale' || $op_type === 'sale_teh' ) && $sale_hold_order_id > 0 ) {
         $sale_edit_order = wc_get_order( $sale_hold_order_id );
         if ( ! $sale_edit_order ) {
@@ -828,6 +830,8 @@ function wc_suf_save_stock_update_handler(){
             wp_send_json_error(['message' => 'این سفارش نهایی شده و قابل ویرایش نیست.']);
         }
 
+        $sale_edit_released_hold_order = $sale_edit_order->has_status( 'instaformremove' ) && 'yes' === $sale_edit_order->get_meta( '_wc_suf_hold_stock_released', true );
+
         foreach ( $sale_edit_order->get_items('line_item') as $existing_item ) {
             if ( ! is_a( $existing_item, 'WC_Order_Item_Product' ) ) {
                 continue;
@@ -839,7 +843,7 @@ function wc_suf_save_stock_update_handler(){
             if ( $existing_pid <= 0 ) {
                 continue;
             }
-            $sale_edit_existing_qty_map[ $existing_pid ] = max( 0, (int) $existing_item->get_quantity() );
+            $sale_edit_existing_qty_map[ $existing_pid ] = $sale_edit_released_hold_order ? 0 : max( 0, (int) $existing_item->get_quantity() );
         }
     }
 
@@ -884,7 +888,7 @@ function wc_suf_save_stock_update_handler(){
             }
 
             if( $req > $effective_available ){
-                if ( in_array( $op_type, ['sale','sale_teh'], true ) && $sale_submit_mode === 'pending_review' ) {
+                if ( in_array( $op_type, ['sale','sale_teh'], true ) && ( $sale_submit_mode === 'pending_review' || $sale_edit_released_hold_order ) ) {
                     continue;
                 }
                 $insufficient[] = [
@@ -1279,7 +1283,8 @@ function wc_suf_save_stock_update_handler(){
             $sale_order->update_meta_data( 'نحوه فروش', wc_suf_get_sale_method_labels()[ $sale_method ] );
             $sale_order->update_meta_data( '_wc_suf_sale_submit_mode', $sale_submit_mode );
 
-            $sale_pending_breakdown = wc_suf_reconcile_sale_order_items( $sale_order, $items, $sale_reconcile_warnings );
+            $ignore_existing_allocations = $sale_order->has_status( 'instaformremove' ) && 'yes' === $sale_order->get_meta( '_wc_suf_hold_stock_released', true );
+            $sale_pending_breakdown = wc_suf_reconcile_sale_order_items( $sale_order, $items, $sale_reconcile_warnings, $ignore_existing_allocations );
             if ( is_wp_error( $sale_pending_breakdown ) ) {
                 throw new Exception( $sale_pending_breakdown->get_error_message() );
             }
@@ -1307,12 +1312,17 @@ function wc_suf_save_stock_update_handler(){
             $sale_order->update_meta_data( '_wc_qof_pending_price_map', wp_json_encode( $sale_pending_price_map, JSON_UNESCAPED_UNICODE ) );
             wc_suf_update_pending_order_visible_meta( $sale_order, $sale_pending_breakdown );
             $sale_order->calculate_totals();
-            if ( $sale_submit_mode === 'pending_review' ) {
+            if ( $ignore_existing_allocations && $pending_qty_total > 0 ) {
+                $sale_order->set_status( 'pendingreview', 'بررسی مجدد موجودی سفارش حذف‌شده اینستا؛ بخشی از اقلام در انتظار ماند.' );
+            } elseif ( $sale_submit_mode === 'pending_review' ) {
                 $sale_order->set_status( 'pendingreview', 'ثبت سفارش در وضعیت در انتظار از فرم فروش.' );
             } elseif ( $sale_method === 'main_onsite' ) {
                 $sale_order->set_status( 'completed', 'ثبت سفارش حضوری انبار اصلی از فرم عملیات فروش و تکمیل مستقیم سفارش.' );
             } else {
                 $sale_order->set_status( 'processing', 'ثبت سفارش از فرم عملیات فروش انبار تولید.' );
+            }
+            if ( $ignore_existing_allocations ) {
+                $sale_order->update_meta_data( '_wc_suf_hold_stock_released', 'reallocated' );
             }
             $sale_order->save();
             wc_suf_clear_sale_hold_expiry( $sale_order->get_id() );
