@@ -1608,6 +1608,15 @@ function wc_suf_complete_pending_sale_handler(){
         }
     }
 
+    if ( $allocated_now_total <= 0 && $pending_qty_total > 0 ) {
+        wp_send_json_error([
+            'message' => 'متاسفانه هیچ کدام از محصولات در انتظار این سفارش به دلیل عدم موجودی تکمیل نگردید',
+            'allocated_now' => 0,
+            'pending_qty_total' => $pending_qty_total,
+            'product_ids' => [],
+        ]);
+    }
+
     $order->update_meta_data( '_wc_suf_pending_breakdown', wp_json_encode( $updated_breakdown, JSON_UNESCAPED_UNICODE ) );
     $order->update_meta_data( '_wc_suf_pending_qty_total', $pending_qty_total );
     $order->update_meta_data( '_wc_suf_pending_qty_map', wp_json_encode( $pending_qty_map, JSON_UNESCAPED_UNICODE ) );
