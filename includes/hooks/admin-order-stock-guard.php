@@ -27,7 +27,24 @@ function wc_suf_prevent_negative_stock_in_admin_order_edit( $prevent, $item, $it
     }
 
     $target_qty = wc_stock_amount( null !== $item_quantity ? $item_quantity : $item->get_quantity() );
-    $reduced_qty = wc_stock_amount( wc_suf_get_order_item_reduced_stock_qty( $item ) );
+    $item_reduced_qty = wc_suf_get_order_item_reduced_stock_qty( $item );
+
+    if ( null === $item_reduced_qty ) {
+        $order_stock_reduced = wc_string_to_bool( (string) $order->get_meta( '_order_stock_reduced', true ) );
+        $created_via = (string) $order->get_created_via();
+
+        /*
+         * برای سفارش‌هایی که موجودی قبلاً دستی/کلی کسر شده اما متای _reduced_stock آیتم ثبت نشده،
+         * مقدار کسرشده را برابر تعداد فعلی آیتم در نظر می‌گیریم تا فقط افزایش جدید بررسی شود.
+         */
+        if ( $order_stock_reduced || in_array( $created_via, [ 'wc_suf_manual_sale', 'wc_suf_manual_sale_hold' ], true ) ) {
+            $item_reduced_qty = (float) $item->get_quantity();
+        } else {
+            $item_reduced_qty = 0;
+        }
+    }
+
+    $reduced_qty = wc_stock_amount( $item_reduced_qty );
     if ( $target_qty <= $reduced_qty ) {
         return $prevent;
     }
