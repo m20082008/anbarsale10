@@ -431,7 +431,132 @@ function wc_suf_log_sale_edit_change( $order, $product, $change_qty, $old_qty, $
     );
 }
 
-function wc_suf_reconcile_sale_order_items( $order, $requested_items, &$warnings = [], $ignore_existing_allocations = false ) {
+
+function wc_suf_record_sale_edit_main_stock_change( &$changes, $product, $old_qty, $new_qty ) {
+    if ( ! is_array( $changes ) || ! $product || ! is_a( $product, 'WC_Product' ) ) {
+        return;
+    }
+
+    $pid = (int) $product->get_id();
+    if ( $pid <= 0 ) {
+        return;
+    }
+
+    if ( ! isset( $changes[ $pid ] ) ) {
+        $changes[ $pid ] = [
+            'product' => $product,
+            'old_qty' => (float) $old_qty,
+            'new_qty' => (float) $new_qty,
+        ];
+        return;
+    }
+
+    $changes[ $pid ]['product'] = $product;
+    $changes[ $pid ]['new_qty'] = (float) $new_qty;
+}
+
+function wc_suf_log_sale_edit_stock_changes( $order, $changes, $submit_label = '' ) {
+    if ( ! $order || ! is_a( $order, 'WC_Order' ) || empty( $changes ) || ! is_array( $changes ) ) {
+        return;
+    }
+
+    global $wpdb;
+    $move_table = $wpdb->prefix . 'stock_production_moves';
+    $audit_table = $wpdb->prefix . 'stock_audit';
+    $order_number = (string) $order->get_order_number();
+    $batch_code = 'sale_edit_' . $order_number;
+    $created_at = current_time('mysql');
+    $current_user = wp_get_current_user();
+    $user_id = get_current_user_id();
+    $user_display = '';
+    if ( $current_user && $current_user->exists() ) {
+        $user_display = trim( (string) ( $current_user->display_name ?: $current_user->user_login ) );
+    }
+    if ( $user_display === '' ) {
+        $user_display = trim( (string) $order->get_meta('_wc_suf_seller_name', true ) );
+    }
+    if ( $user_display === '' ) {
+        $user_display = 'system';
+    }
+
+    $submit_label = trim( (string) $submit_label );
+
+    foreach ( $changes as $change ) {
+        $product = $change['product'] ?? null;
+        if ( ! $product || ! is_a( $product, 'WC_Product' ) ) {
+            continue;
+        }
+
+        $old_qty = (float) ( $change['old_qty'] ?? 0 );
+        $new_qty = (float) ( $change['new_qty'] ?? $old_qty );
+        $change_qty = $new_qty - $old_qty;
+        if ( abs( $change_qty ) < 0.0001 ) {
+            continue;
+        }
+
+        $purpose_parts = [
+            sprintf( 'ویرایش سفارش #%s', $order_number ),
+        ];
+        if ( $submit_label !== '' ) {
+            $purpose_parts[] = $submit_label;
+        }
+        $purpose_parts[] = sprintf(
+            'تغییر نهایی موجودی انبار اصلی: %s → %s | میزان تغییر: %s',
+            wc_format_decimal( $old_qty, 4 ),
+            wc_format_decimal( $new_qty, 4 ),
+            wc_format_decimal( $change_qty, 4 )
+        );
+        $purpose = implode( ' | ', $purpose_parts );
+
+        $wpdb->insert(
+            $move_table,
+            [
+                'batch_code' => $batch_code,
+                'operation' => 'sale_edit',
+                'destination' => 'main',
+                'product_id' => (int) $product->get_id(),
+                'product_name' => wc_suf_full_product_label( $product ),
+                'sku' => (string) $product->get_sku(),
+                'product_type' => (string) $product->get_type(),
+                'parent_id' => (int) $product->get_parent_id(),
+                'attributes_text' => wc_suf_get_product_attributes_text( $product ),
+                'old_qty' => $old_qty,
+                'change_qty' => $change_qty,
+                'new_qty' => $new_qty,
+                'destination_old_qty' => $old_qty,
+                'destination_new_qty' => $new_qty,
+                'user_id' => $user_id > 0 ? $user_id : null,
+                'user_login' => $user_display,
+                'user_code' => $order_number,
+                'created_at' => $created_at,
+            ]
+        );
+
+        $wpdb->insert(
+            $audit_table,
+            [
+                'batch_code'   => $batch_code,
+                'csv_file_url' => null,
+                'word_file_url'=> null,
+                'op_type'      => 'sale_edit',
+                'purpose'      => $purpose,
+                'print_label'  => 0,
+                'product_id'   => (int) $product->get_id(),
+                'product_name' => wc_suf_full_product_label( $product ),
+                'old_qty'      => $old_qty,
+                'added_qty'    => $change_qty,
+                'new_qty'      => $new_qty,
+                'user_id'      => $user_id > 0 ? $user_id : null,
+                'user_login'   => $user_display,
+                'user_code'    => $order_number,
+                'ip'           => '',
+                'created_at'   => $created_at,
+            ]
+        );
+    }
+}
+
+function wc_suf_reconcile_sale_order_items( $order, $requested_items, &$warnings = [], $ignore_existing_allocations = false, &$stock_changes = null ) {
     $warnings = [];
     if ( ! $order || ! is_a( $order, 'WC_Order' ) ) {
         return new WP_Error( 'invalid_order', 'دسترسی به سفارش ممکن نیست.' );
@@ -475,7 +600,11 @@ function wc_suf_reconcile_sale_order_items( $order, $requested_items, &$warnings
                 $old_stock = $have;
                 wc_update_product_stock( $product, $alloc_delta, 'decrease' );
                 $new_stock = max( 0, $old_stock - $alloc_delta );
-                wc_suf_log_sale_edit_change( $order, $product, -1 * $alloc_delta, $old_stock, $new_stock, $target_qty, max(0, $need - $alloc_delta) );
+                if ( is_array( $stock_changes ) ) {
+                    wc_suf_record_sale_edit_main_stock_change( $stock_changes, $product, $old_stock, $new_stock );
+                } else {
+                    wc_suf_log_sale_edit_change( $order, $product, -1 * $alloc_delta, $old_stock, $new_stock, $target_qty, max(0, $need - $alloc_delta) );
+                }
             }
             $allocated_new = $allocated_old + $alloc_delta;
             if ( $alloc_delta < $need ) {
@@ -487,7 +616,11 @@ function wc_suf_reconcile_sale_order_items( $order, $requested_items, &$warnings
                 $old_stock = (int) ( $product->get_stock_quantity() ?? 0 );
                 wc_update_product_stock( $product, $release, 'increase' );
                 $new_stock = $old_stock + $release;
-                wc_suf_log_sale_edit_change( $order, $product, $release, $old_stock, $new_stock, $target_qty, 0 );
+                if ( is_array( $stock_changes ) ) {
+                    wc_suf_record_sale_edit_main_stock_change( $stock_changes, $product, $old_stock, $new_stock );
+                } else {
+                    wc_suf_log_sale_edit_change( $order, $product, $release, $old_stock, $new_stock, $target_qty, 0 );
+                }
             }
             $allocated_new = $target_qty;
         }
@@ -597,6 +730,7 @@ function wc_suf_sync_sale_hold_order_handler(){
     }
 
     $sync_warnings = [];
+    $sale_hold_edit_stock_changes = [];
     foreach ( $existing_items as $pid => $entry ) {
         $old_qty = max(0, (int) $entry['item']->get_quantity());
         $target_qty = max(0, (int) ($desired[ $pid ] ?? 0));
@@ -608,14 +742,26 @@ function wc_suf_sync_sale_hold_order_handler(){
             $alloc_delta = min( $delta, max( 0, $have ) );
             $new_qty = $old_qty + $alloc_delta;
             if ( $alloc_delta > 0 ) {
+                $old_stock = $have;
                 wc_update_product_stock( $product, $alloc_delta, 'decrease' );
+                $new_stock = max( 0, $old_stock - $alloc_delta );
+                if ( $order_id > 0 ) {
+                    wc_suf_record_sale_edit_main_stock_change( $sale_hold_edit_stock_changes, $product, $old_stock, $new_stock );
+                }
             }
             if ( $alloc_delta < $delta ) {
                 $sync_warnings[] = sprintf('موجودی محصول #%d محدود بود و بخشی از مقدار به‌صورت در انتظار باقی ماند.', $pid);
             }
         } elseif ( $delta < 0 ) {
             $product = wc_get_product( $pid );
-            wc_update_product_stock( $product, abs($delta), 'increase' );
+            if ( $product ) {
+                $old_stock = (int) ( $product->get_stock_quantity() ?? 0 );
+                wc_update_product_stock( $product, abs($delta), 'increase' );
+                $new_stock = $old_stock + abs($delta);
+                if ( $order_id > 0 ) {
+                    wc_suf_record_sale_edit_main_stock_change( $sale_hold_edit_stock_changes, $product, $old_stock, $new_stock );
+                }
+            }
         }
 
         if ( $new_qty <= 0 ) {
@@ -633,8 +779,13 @@ function wc_suf_sync_sale_hold_order_handler(){
         $have = (int) ( $product->get_stock_quantity() ?? 0 );
         $alloc_qty = min( $qty, max(0, $have) );
         if ( $alloc_qty > 0 ) {
+            $old_stock = $have;
             $order->add_product( $product, $alloc_qty );
             wc_update_product_stock( $product, $alloc_qty, 'decrease' );
+            if ( $order_id > 0 ) {
+                $new_stock = max( 0, $old_stock - $alloc_qty );
+                wc_suf_record_sale_edit_main_stock_change( $sale_hold_edit_stock_changes, $product, $old_stock, $new_stock );
+            }
         }
         if ( $alloc_qty < $qty ) {
             $sync_warnings[] = sprintf('موجودی محصول #%d محدود بود و بخشی از مقدار به‌صورت در انتظار باقی ماند.', $pid);
@@ -666,6 +817,10 @@ function wc_suf_sync_sale_hold_order_handler(){
     $order->update_meta_data( 'نحوه فروش', wc_suf_get_sale_method_labels()[ $sale_method ] );
     $order->calculate_totals();
     $order->save();
+
+    if ( $order_id > 0 ) {
+        wc_suf_log_sale_edit_stock_changes( $order, $sale_hold_edit_stock_changes, 'ذخیره موقت' );
+    }
 
     if ( $is_new_hold_order && 'yes' !== $order->get_meta( '_wc_suf_sale_hold_logged', true ) ) {
         wc_suf_log_sale_hold_event( $order, 'sale_hold', 'هولد اولیه سفارش فروش', -1 );
@@ -932,6 +1087,7 @@ function wc_suf_save_stock_update_handler(){
     $sale_order = null;
     $sale_pending_breakdown = [];
     $sale_reconcile_warnings = [];
+    $sale_edit_stock_changes = [];
 
     foreach($items as $it){
         $pid = isset($it['id'])  ? absint($it['id']) : 0;
@@ -1284,7 +1440,7 @@ function wc_suf_save_stock_update_handler(){
             $sale_order->update_meta_data( '_wc_suf_sale_submit_mode', $sale_submit_mode );
 
             $ignore_existing_allocations = $sale_order->has_status( 'instaformremove' ) && 'yes' === $sale_order->get_meta( '_wc_suf_hold_stock_released', true );
-            $sale_pending_breakdown = wc_suf_reconcile_sale_order_items( $sale_order, $items, $sale_reconcile_warnings, $ignore_existing_allocations );
+            $sale_pending_breakdown = wc_suf_reconcile_sale_order_items( $sale_order, $items, $sale_reconcile_warnings, $ignore_existing_allocations, $sale_edit_stock_changes );
             if ( is_wp_error( $sale_pending_breakdown ) ) {
                 throw new Exception( $sale_pending_breakdown->get_error_message() );
             }
@@ -1325,6 +1481,7 @@ function wc_suf_save_stock_update_handler(){
                 $sale_order->update_meta_data( '_wc_suf_hold_stock_released', 'reallocated' );
             }
             $sale_order->save();
+            wc_suf_log_sale_edit_stock_changes( $sale_order, $sale_edit_stock_changes, 'ثبت نهایی' );
             wc_suf_clear_sale_hold_expiry( $sale_order->get_id() );
         } catch ( Exception $e ) {
             if ( $tx_started ) {
